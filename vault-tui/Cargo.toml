@@ -18,3 +18,5 @@ tokio         = { workspace = true }
 arboard       = { workspace = true }
 dirs          = { workspace = true }
 color-eyre    = { workspace = true }
+chrono        = { workspace = true }
+secrecy       = { workspace = true }

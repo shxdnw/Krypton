@@ -1645,10 +1645,12 @@ name = "vault-tui"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "chrono",
  "color-eyre",
  "crossterm",
  "dirs",
  "ratatui",
+ "secrecy",
  "tokio",
  "vault-core",
  "vault-crypto",
