@@ -1209,23 +1209,25 @@ impl App {
     // ── Clipboard ────────────────────────────────────────────────────
 
     /// Copy text to the system clipboard and schedule an auto-clear after
-    /// 30 seconds. Falls back to `wl-copy` on Wayland if arboard fails.
+    /// the configured timeout. Respects the `clipboard_tool` config.
     /// Returns `true` on success so the caller can show feedback.
     fn copy_to_clipboard(&mut self, text: &str) -> bool {
         if let Some(handle) = self.clipboard_abort.take() {
             handle.abort();
         }
 
-        let success = try_clipboard_set(text);
+        let tool = self.config.clipboard_tool.clone();
+        let success = try_clipboard_set(text, &tool);
         if !success {
             return false;
         }
 
         let timeout = self.config.clipboard_timeout_secs;
         let owned = zeroize::Zeroizing::new(text.to_string());
+        let tool_clone = tool.clone();
         let handle = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(timeout as u64)).await;
-            let _ = try_clipboard_clear();
+            let _ = try_clipboard_clear(&tool_clone);
             drop(owned);
         });
         self.clipboard_abort = Some(handle.abort_handle());
@@ -1237,7 +1239,8 @@ impl App {
         if let Some(handle) = self.clipboard_abort.take() {
             handle.abort();
         }
-        let _ = try_clipboard_clear();
+        let tool = self.config.clipboard_tool.clone();
+        let _ = try_clipboard_clear(&tool);
     }
 }
 
@@ -1262,63 +1265,72 @@ fn try_clipboard_cmd(cmd: &str, text: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Store current clipboard in cliphist if available.
-fn try_cliphist_store() -> bool {
-    std::process::Command::new("cliphist")
-        .arg("store")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Try to set the clipboard via arboard, falling back to wl-copy or xclip.
-fn try_clipboard_set(text: &str) -> bool {
-    if let Ok(mut board) = arboard::Clipboard::new() {
-        if board.set_text(text).is_ok() {
-            let _ = try_cliphist_store();
-            return true;
+/// Try to set the clipboard based on the configured tool.
+/// "auto": arboard first, then wl-copy, then xclip.
+/// "arboard": arboard only.
+/// "wl-copy": wl-copy only.
+/// "xclip": xclip only.
+fn try_clipboard_set(text: &str, tool: &str) -> bool {
+    match tool {
+        "arboard" => {
+            if let Ok(mut board) = arboard::Clipboard::new() {
+                board.set_text(text).is_ok()
+            } else {
+                false
+            }
+        }
+        "wl-copy" => try_clipboard_cmd("wl-copy", text),
+        "xclip" => try_clipboard_cmd("xclip", text),
+        _ => {
+            if let Ok(mut board) = arboard::Clipboard::new() {
+                if board.set_text(text).is_ok() {
+                    return true;
+                }
+            }
+            if try_clipboard_cmd("wl-copy", text) {
+                return true;
+            }
+            try_clipboard_cmd("xclip", text)
         }
     }
-    // Pipe via stdin — never argv.
-    if try_clipboard_cmd("wl-copy", text) {
-        return true;
-    }
-    if try_clipboard_cmd("xclip", text) {
-        return true;
-    }
-    false
 }
 
-/// Clear the system clipboard and cliphist history.
-fn try_clipboard_clear() -> bool {
-    let mut ok = false;
-    if let Ok(mut board) = arboard::Clipboard::new() {
-        ok |= board.set_text("").is_ok();
+/// Clear the system clipboard using the configured tool.
+fn try_clipboard_clear(tool: &str) -> bool {
+    match tool {
+        "arboard" => {
+            if let Ok(mut board) = arboard::Clipboard::new() {
+                board.set_text("").is_ok()
+            } else {
+                false
+            }
+        }
+        "wl-copy" => std::process::Command::new("wl-copy")
+            .arg("--clear")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false),
+        "xclip" => true, // xclip doesn't hold clipboard; clearing is a no-op
+        _ => {
+            let mut ok = false;
+            if let Ok(mut board) = arboard::Clipboard::new() {
+                ok |= board.set_text("").is_ok();
+            }
+            if std::process::Command::new("wl-copy")
+                .arg("--clear")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                ok = true;
+            }
+            ok
+        }
     }
-    if std::process::Command::new("wl-copy")
-        .arg("--clear")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        ok = true;
-    }
-    if std::process::Command::new("cliphist")
-        .arg("wipe")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        ok = true;
-    }
-    ok
 }
 
 impl Drop for App {
