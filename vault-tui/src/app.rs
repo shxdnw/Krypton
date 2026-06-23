@@ -916,6 +916,35 @@ impl App {
                     _ => {}
                 }
             }
+            Action::GeneratePassword => {
+                if state.active_field == 2 {
+                    let gen_config = vault_ext::GeneratorConfig {
+                        length: self.config.password_length,
+                        uppercase: self.config.password_uppercase,
+                        lowercase: self.config.password_lowercase,
+                        digits: self.config.password_digits,
+                        symbols: self.config.password_symbols,
+                    };
+                    let generators = self.service.extensions.generators();
+                    if let Some(gen) = generators.first() {
+                        match gen.generate(&gen_config) {
+                            Ok(pw) => {
+                                state.password =
+                                    SecretString::new(pw.into());
+                                state.dirty = true;
+                                self.show_toast(
+                                    "Password generated",
+                                    ToastKind::Success,
+                                );
+                            }
+                            Err(e) => self.show_toast(
+                                format!("Generator error: {e}"),
+                                ToastKind::Error,
+                            ),
+                        }
+                    }
+                }
+            }
             Action::SaveEntry => {
                 if state.title.trim().is_empty() {
                     self.show_toast(

@@ -68,7 +68,7 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect, accent: Color) 
     }
 
     let hint = Paragraph::new(
-        "[Tab] next field  [Shift+Tab] prev  [Ctrl+S] save  [Esc] discard",
+        "[Tab] next  [Shift+Tab] prev  [Ctrl+G] generate pw  [Ctrl+S] save  [Esc] discard",
     )
     .style(Style::default().fg(Color::Gray))
     .alignment(Alignment::Center);

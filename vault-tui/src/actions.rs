@@ -31,4 +31,5 @@ pub enum Action {
     Click(u16, u16),
     OpenSettings,
     ToggleSetting,
+    GeneratePassword,
 }
