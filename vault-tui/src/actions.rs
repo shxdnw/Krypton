@@ -27,4 +27,8 @@ pub enum Action {
     PrevField,
     Lock,
     Tick,
+    /// Mouse click at terminal coordinates (column, row).
+    Click(u16, u16),
+    OpenSettings,
+    ToggleSetting,
 }

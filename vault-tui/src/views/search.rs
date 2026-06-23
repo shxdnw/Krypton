@@ -13,6 +13,13 @@ pub fn render(f: &mut Frame, state: &SearchState, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
+    // Store result list rect for mouse hit-testing (skip search bar + hint).
+    state.result_rect.set(ratatui::layout::Rect {
+        y: chunks[1].y + 1,
+        height: chunks[1].height.saturating_sub(2),
+        ..chunks[1]
+    });
+
     // Search bar.
     let query_display = if state.query.is_empty() {
         "Type to search...".into()

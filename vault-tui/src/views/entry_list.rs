@@ -9,6 +9,12 @@ use crate::app::EntryListState;
 
 /// Render the entry list as a table with highlight on the selected row.
 pub fn render(f: &mut Frame, state: &EntryListState, area: Rect) {
+    // Store table body rect for mouse hit-testing (skip header row + hint bar).
+    state.table_rect.set(ratatui::layout::Rect {
+        y: area.y + 2, // header + border
+        height: area.height.saturating_sub(3), // header + hint
+        ..area
+    });
     let header = Row::new(["Title", "Username", "Updated"])
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
 
