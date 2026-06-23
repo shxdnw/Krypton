@@ -1656,6 +1656,7 @@ dependencies = [
  "vault-crypto",
  "vault-ext",
  "vault-service",
+ "zeroize",
 ]
 
 [[package]]
