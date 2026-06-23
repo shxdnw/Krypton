@@ -90,6 +90,8 @@ pub struct EntryListState {
     pub selected: usize,
     /// Layout rect of the table body for mouse hit-testing.
     pub table_rect: Cell<ratatui::layout::Rect>,
+    /// Full entry data for the currently selected item (sidebar preview).
+    pub preview_entry: Option<Entry>,
 }
 
 // Manual impl — Cell is !Debug + !Clone
@@ -98,6 +100,7 @@ impl std::fmt::Debug for EntryListState {
         f.debug_struct("EntryListState")
             .field("entries", &self.entries)
             .field("selected", &self.selected)
+            .field("preview_entry", &self.preview_entry)
             .finish()
     }
 }
@@ -107,6 +110,7 @@ impl Clone for EntryListState {
             entries: self.entries.clone(),
             selected: self.selected,
             table_rect: Cell::new(self.table_rect.get()),
+            preview_entry: self.preview_entry.clone(),
         }
     }
 }
@@ -117,6 +121,7 @@ impl Default for EntryListState {
             entries: Vec::new(),
             selected: 0,
             table_rect: Cell::new(ratatui::layout::Rect::default()),
+            preview_entry: None,
         }
     }
 }
@@ -460,16 +465,10 @@ impl App {
                             Some(format!("Failed to create vault: {e}"));
                         return;
                     }
-                    match self.service.list_entries() {
-                        Ok(entries) => {
+                    match Self::make_entry_list_state_from(&self.service) {
+                        Ok(list_state) => {
                             self.state =
-                                AppState::Unlocked(View::EntryList(
-                                    EntryListState {
-                                        entries,
-                                        selected: 0,
-                                        table_rect: Cell::new(ratatui::layout::Rect::default()),
-                                    },
-                                ));
+                                AppState::Unlocked(View::EntryList(list_state));
                         }
                         Err(e) => {
                             state.error = Some(format!(
@@ -506,16 +505,10 @@ impl App {
             Action::Submit => {
                 let pw = state.input.expose_secret().clone();
                 match self.service.unlock(&pw) {
-                    Ok(()) => match self.service.list_entries() {
-                        Ok(entries) => {
+                    Ok(()) => match Self::make_entry_list_state_from(&self.service) {
+                        Ok(list_state) => {
                             self.state =
-                                AppState::Unlocked(View::EntryList(
-                                    EntryListState {
-                                        entries,
-                                        selected: 0,
-                                        table_rect: Cell::new(ratatui::layout::Rect::default()),
-                                    },
-                                ));
+                                AppState::Unlocked(View::EntryList(list_state));
                         }
                         Err(e) => {
                             state.error = Some(format!(
@@ -552,18 +545,34 @@ impl App {
                 if state.selected > 0 {
                     state.selected -= 1;
                 }
+                state.preview_entry = state
+                    .entries
+                    .get(state.selected)
+                    .and_then(|s| self.service.get_entry(&s.id).ok());
             }
             Action::Down => {
                 if state.selected + 1 < state.entries.len() {
                     state.selected += 1;
                 }
+                state.preview_entry = state
+                    .entries
+                    .get(state.selected)
+                    .and_then(|s| self.service.get_entry(&s.id).ok());
             }
             Action::PageUp => {
                 state.selected = state.selected.saturating_sub(10);
+                state.preview_entry = state
+                    .entries
+                    .get(state.selected)
+                    .and_then(|s| self.service.get_entry(&s.id).ok());
             }
             Action::PageDown => {
                 let len = state.entries.len().saturating_sub(1);
                 state.selected = (state.selected + 10).min(len);
+                state.preview_entry = state
+                    .entries
+                    .get(state.selected)
+                    .and_then(|s| self.service.get_entry(&s.id).ok());
             }
             Action::Click(_col, row) => {
                 let r = state.table_rect.get();
@@ -571,6 +580,10 @@ impl App {
                     let idx = (row - r.y) as usize;
                     if idx < state.entries.len() {
                         state.selected = idx;
+                        state.preview_entry = state
+                            .entries
+                            .get(state.selected)
+                            .and_then(|s| self.service.get_entry(&s.id).ok());
                     }
                 }
             }
@@ -1082,17 +1095,28 @@ impl App {
 
     // ── Helpers ──────────────────────────────────────────────────────
 
+    /// Build an EntryListState from the given service. A free function so it
+    /// can be called while `self.state` is mutably borrowed (it only borrows
+    /// `self.service` via field access).
+    fn make_entry_list_state_from(
+        service: &Arc<VaultService>,
+    ) -> Result<EntryListState, vault_core::VaultError> {
+        let entries = service.list_entries()?;
+        let preview = entries
+            .first()
+            .and_then(|s| service.get_entry(&s.id).ok());
+        Ok(EntryListState {
+            entries,
+            selected: 0,
+            table_rect: Cell::new(ratatui::layout::Rect::default()),
+            preview_entry: preview,
+        })
+    }
+
     fn pop_to_list(&mut self) {
-        match self.service.list_entries() {
-            Ok(entries) => {
-                self.state =
-                    AppState::Unlocked(View::EntryList(
-                        EntryListState {
-                            entries,
-                            selected: 0,
-                            table_rect: Cell::new(ratatui::layout::Rect::default()),
-                        },
-                    ));
+        match Self::make_entry_list_state_from(&self.service) {
+            Ok(list_state) => {
+                self.state = AppState::Unlocked(View::EntryList(list_state));
             }
             Err(e) => {
                 self.show_toast(
@@ -1117,6 +1141,11 @@ impl App {
                 } else {
                     list.selected = old_selected;
                 }
+                // Refresh preview after reload.
+                list.preview_entry = list
+                    .entries
+                    .get(list.selected)
+                    .and_then(|s| self.service.get_entry(&s.id).ok());
             }
         }
     }
