@@ -36,6 +36,9 @@ async fn main() -> color_eyre::Result<()> {
     };
 
     let mut app = App::new(service, config, initial_state);
+    app.service
+        .encrypt_metadata
+        .store(app.config.encrypt_metadata, std::sync::atomic::Ordering::Relaxed);
     events::run(&mut app).await?;
 
     Ok(())
