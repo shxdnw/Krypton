@@ -1,0 +1,20 @@
+[package]
+name    = "vault-tui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "krp"
+path = "src/main.rs"
+
+[dependencies]
+vault-core    = { workspace = true }
+vault-service = { workspace = true }
+vault-ext     = { workspace = true }
+vault-crypto  = { workspace = true }
+ratatui       = { workspace = true }
+crossterm     = { workspace = true }
+tokio         = { workspace = true }
+arboard       = { workspace = true }
+dirs          = { workspace = true }
+color-eyre    = { workspace = true }

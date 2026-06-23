@@ -1,0 +1,13 @@
+[package]
+name    = "vault-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+uuid      = { workspace = true }
+serde     = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+secrecy   = { workspace = true }
+zeroize   = { workspace = true }
+chrono    = { workspace = true }

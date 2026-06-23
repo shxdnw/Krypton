@@ -1,0 +1,8 @@
+[package]
+name    = "vault-ext"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vault-core = { workspace = true }
+rand       = { workspace = true }

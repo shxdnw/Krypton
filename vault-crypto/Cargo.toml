@@ -1,0 +1,11 @@
+[package]
+name    = "vault-crypto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vault-core       = { workspace = true }
+argon2           = { workspace = true }
+chacha20poly1305 = { workspace = true }
+rand             = { workspace = true }
+zeroize          = { workspace = true }

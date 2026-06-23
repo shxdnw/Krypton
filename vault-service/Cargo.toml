@@ -1,0 +1,10 @@
+[package]
+name    = "vault-service"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vault-core   = { workspace = true }
+vault-crypto = { workspace = true }
+vault-store  = { workspace = true }
+vault-ext    = { workspace = true }
