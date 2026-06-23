@@ -49,6 +49,22 @@ pub struct KryptonConfig {
     /// Show line numbers or row indicators in lists.
     #[serde(default)]
     pub show_row_numbers: bool,
+
+    // ── Layout ─────────────────────────────────────────────────────────
+    /// Show the preview sidebar next to the entries table.
+    #[serde(default = "default_true")]
+    pub sidebar_enabled: bool,
+
+    // ── Input ──────────────────────────────────────────────────────────
+    /// Enable vim-style j/k navigation keys alongside arrow keys.
+    #[serde(default = "default_true")]
+    pub vim_keybinds: bool,
+
+    // ── Clipboard ──────────────────────────────────────────────────────
+    /// Clipboard backend: "auto", "wl-copy", "xclip", or "arboard".
+    /// "auto" tries arboard first, then falls back to wl-copy / xclip.
+    #[serde(default = "default_clipboard_tool")]
+    pub clipboard_tool: String,
 }
 
 impl Default for KryptonConfig {
@@ -65,6 +81,9 @@ impl Default for KryptonConfig {
             relative_timestamps: true,
             accent_color: "Cyan".into(),
             show_row_numbers: false,
+            sidebar_enabled: true,
+            vim_keybinds: true,
+            clipboard_tool: "auto".into(),
         }
     }
 }
@@ -82,6 +101,9 @@ fn default_true() -> bool {
 }
 fn default_accent() -> String {
     "Cyan".into()
+}
+fn default_clipboard_tool() -> String {
+    "auto".into()
 }
 
 // ── Load / save ──────────────────────────────────────────────────────

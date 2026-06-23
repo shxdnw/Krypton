@@ -211,7 +211,7 @@ impl Default for SettingsState {
 
 impl SettingsState {
     /// Number of setting rows.
-    pub fn len(&self) -> usize { 9 }
+    pub fn len(&self) -> usize { 12 }
 
     /// Get the display label and value string for row `i`.
     pub fn row(&self, i: usize) -> (String, String) {
@@ -231,6 +231,9 @@ impl SettingsState {
             6 => ("Digits".into(), fmt_bool(self.config.password_digits)),
             7 => ("Symbols".into(), fmt_bool(self.config.password_symbols)),
             8 => ("Relative timestamps".into(), fmt_bool(self.config.relative_timestamps)),
+            9 => ("Sidebar enabled".into(), fmt_bool(self.config.sidebar_enabled)),
+            10 => ("Vim keybinds (j/k)".into(), fmt_bool(self.config.vim_keybinds)),
+            11 => ("Clipboard tool".into(), self.config.clipboard_tool.clone()),
             _ => ("".into(), "".into()),
         }
     }
@@ -245,6 +248,17 @@ impl SettingsState {
             6 => self.config.password_digits = !self.config.password_digits,
             7 => self.config.password_symbols = !self.config.password_symbols,
             8 => self.config.relative_timestamps = !self.config.relative_timestamps,
+            9 => self.config.sidebar_enabled = !self.config.sidebar_enabled,
+            10 => self.config.vim_keybinds = !self.config.vim_keybinds,
+            11 => {
+                // Cycle clipboard tool: auto → wl-copy → xclip → arboard → auto
+                self.config.clipboard_tool = match self.config.clipboard_tool.as_str() {
+                    "auto" => "wl-copy".into(),
+                    "wl-copy" => "xclip".into(),
+                    "xclip" => "arboard".into(),
+                    _ => "auto".into(),
+                };
+            }
             _ => {}
         }
     }
