@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use vault_core::{Entry, EntryId, EntrySummary};
 use vault_service::VaultService;
 
@@ -22,21 +22,48 @@ pub struct Toast {
 }
 
 
-#[derive(Debug, Clone, Default)]
+/// Master-password input on the unlock screen.
+///
+/// The password is stored as [`SecretString`] so it is redacted in logs and
+/// zeroized when the state is dropped.
+#[derive(Debug, Clone)]
 pub struct LockedState {
-    pub input: String,
+    pub input: SecretString,
     pub hidden: bool,
     pub error: Option<String>,
     #[allow(dead_code)]
     pub loading: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+impl Default for LockedState {
+    fn default() -> Self {
+        Self {
+            input: SecretString::new("".into()),
+            hidden: true,
+            error: None,
+            loading: false,
+        }
+    }
+}
+
+/// Master-password creation during first run.
+#[derive(Debug, Clone)]
 pub struct FirstRunState {
     pub step: FirstRunStep,
-    pub password: String,
-    pub confirm: String,
+    pub password: SecretString,
+    pub confirm: SecretString,
     pub error: Option<String>,
+}
+
+impl Default for FirstRunState {
+    fn default() -> Self {
+        Self {
+            step: FirstRunStep::default(),
+            password: SecretString::new("".into()),
+            confirm: SecretString::new("".into()),
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -67,12 +94,16 @@ pub struct EntryDetailState {
     pub show_password: bool,
 }
 
+/// Inline entry editor.
+///
+/// The `password` field is a [`SecretString`]; characters are appended by
+/// exposing the current value, appending, and re-wrapping.
 #[derive(Debug, Clone)]
 pub struct EntryEditState {
     pub id: Option<EntryId>,
     pub title: String,
     pub username: String,
-    pub password: String,
+    pub password: SecretString,
     pub url: String,
     pub notes: String,
     pub active_field: usize,
@@ -85,7 +116,7 @@ impl Default for EntryEditState {
             id: None,
             title: String::new(),
             username: String::new(),
-            password: String::new(),
+            password: SecretString::new("".into()),
             url: String::new(),
             notes: String::new(),
             active_field: 0,
@@ -125,6 +156,8 @@ pub struct App {
     pub should_quit: bool,
     pub toast: Option<Toast>,
     pub toast_ticks: u8,
+    /// Handle to abort the clipboard-clear timer so we can wipe on lock/quit.
+    clipboard_abort: Option<tokio::task::AbortHandle>,
 }
 
 impl App {
@@ -135,6 +168,7 @@ impl App {
             should_quit: false,
             toast: None,
             toast_ticks: 0,
+            clipboard_abort: None,
         }
     }
 
@@ -159,7 +193,10 @@ impl App {
     pub fn handle_action(&mut self, action: Action) {
         match action {
             Action::Tick => self.tick(),
-            Action::Quit => self.should_quit = true,
+            Action::Quit => {
+                self.clear_clipboard_now();
+                self.should_quit = true;
+            }
             _ => self.handle_action_inner(action),
         }
     }
@@ -185,21 +222,27 @@ impl App {
         };
 
         match action {
-            Action::CharInput(c) => match state.step {
-                FirstRunStep::EnterPassword => state.password.push(c),
-                FirstRunStep::ConfirmPassword => state.confirm.push(c),
-            },
-            Action::Backspace => match state.step {
-                FirstRunStep::EnterPassword => {
-                    state.password.pop();
-                }
-                FirstRunStep::ConfirmPassword => {
-                    state.confirm.pop();
-                }
-            },
+            Action::CharInput(c) => {
+                let target = match state.step {
+                    FirstRunStep::EnterPassword => &mut state.password,
+                    FirstRunStep::ConfirmPassword => &mut state.confirm,
+                };
+                let mut current = target.expose_secret().clone();
+                current.push(c);
+                *target = SecretString::new(current.into());
+            }
+            Action::Backspace => {
+                let target = match state.step {
+                    FirstRunStep::EnterPassword => &mut state.password,
+                    FirstRunStep::ConfirmPassword => &mut state.confirm,
+                };
+                let mut current = target.expose_secret().clone();
+                current.pop();
+                *target = SecretString::new(current.into());
+            }
             Action::Submit => match state.step {
                 FirstRunStep::EnterPassword => {
-                    if state.password.is_empty() {
+                    if state.password.expose_secret().is_empty() {
                         state.error = Some("Password cannot be empty".into());
                         return;
                     }
@@ -207,40 +250,39 @@ impl App {
                     state.error = None;
                 }
                 FirstRunStep::ConfirmPassword => {
-                    if state.password != state.confirm {
+                    if state.password.expose_secret()
+                        != state.confirm.expose_secret()
+                    {
                         state.error =
                             Some("Passwords do not match".into());
-                        state.confirm.clear();
+                        state.confirm = SecretString::new("".into());
                         return;
                     }
-                    if let Err(e) = self
-                        .service
-                        .create_vault(&state.password)
-                    {
+                    let pw = state.password.expose_secret().clone();
+                    if let Err(e) = self.service.create_vault(&pw) {
                         state.error =
                             Some(format!("Failed to create vault: {e}"));
                         return;
                     }
-                    // Transition to unlocked.
                     match self.service.list_entries() {
                         Ok(entries) => {
-                            self.state = AppState::Unlocked(View::EntryList(
-                                EntryListState {
-                                    entries,
-                                    selected: 0,
-                                },
-                            ));
+                            self.state =
+                                AppState::Unlocked(View::EntryList(
+                                    EntryListState {
+                                        entries,
+                                        selected: 0,
+                                    },
+                                ));
                         }
                         Err(e) => {
-                            state.error =
-                                Some(format!("Failed to load entries: {e}"));
+                            state.error = Some(format!(
+                                "Failed to load entries: {e}"
+                            ));
                         }
                     }
                 }
             },
-            Action::ToggleVisibility => {
-                // Not applicable on first run, but handle gracefully.
-            }
+            Action::ToggleVisibility => { /* not applicable here */ }
             _ => {}
         }
     }
@@ -253,33 +295,43 @@ impl App {
         };
 
         match action {
-            Action::CharInput(c) => state.input.push(c),
+            Action::CharInput(c) => {
+                let mut current = state.input.expose_secret().clone();
+                current.push(c);
+                state.input = SecretString::new(current.into());
+            }
             Action::Backspace => {
-                state.input.pop();
+                let mut current = state.input.expose_secret().clone();
+                current.pop();
+                state.input = SecretString::new(current.into());
             }
             Action::ToggleVisibility => state.hidden = !state.hidden,
-            Action::Submit => match self.service.unlock(&state.input) {
-                Ok(()) => match self.service.list_entries() {
-                    Ok(entries) => {
-                        self.state =
-                            AppState::Unlocked(View::EntryList(
-                                EntryListState {
-                                    entries,
-                                    selected: 0,
-                                },
+            Action::Submit => {
+                let pw = state.input.expose_secret().clone();
+                match self.service.unlock(&pw) {
+                    Ok(()) => match self.service.list_entries() {
+                        Ok(entries) => {
+                            self.state =
+                                AppState::Unlocked(View::EntryList(
+                                    EntryListState {
+                                        entries,
+                                        selected: 0,
+                                    },
+                                ));
+                        }
+                        Err(e) => {
+                            state.error = Some(format!(
+                                "Failed to load entries: {e}"
                             ));
-                    }
-                    Err(e) => {
+                        }
+                    },
+                    Err(_) => {
                         state.error =
-                            Some(format!("Failed to load entries: {e}"));
+                            Some("Wrong master password".into());
+                        state.input = SecretString::new("".into());
                     }
-                },
-                Err(_) => {
-                    state.error =
-                        Some("Wrong master password".into());
-                    state.input.clear();
                 }
-            },
+            }
             _ => {}
         }
     }
@@ -304,17 +356,16 @@ impl App {
                 }
             }
             Action::PageUp => {
-                let jump = state.selected.saturating_sub(10);
-                state.selected = jump;
+                state.selected = state.selected.saturating_sub(10);
             }
             Action::PageDown => {
-                let jump = (state.selected + 10).min(
-                    state.entries.len().saturating_sub(1),
-                );
-                state.selected = jump;
+                let len = state.entries.len().saturating_sub(1);
+                state.selected = (state.selected + 10).min(len);
             }
             Action::Select => {
-                if let Some(summary) = state.entries.get(state.selected) {
+                if let Some(summary) =
+                    state.entries.get(state.selected)
+                {
                     match self.service.get_entry(&summary.id) {
                         Ok(entry) => {
                             self.state =
@@ -325,19 +376,22 @@ impl App {
                                     },
                                 ));
                         }
-                        Err(e) => self
-                            .show_toast(format!("Error: {e}"), ToastKind::Error),
+                        Err(e) => self.show_toast(
+                            format!("Error: {e}"),
+                            ToastKind::Error,
+                        ),
                     }
                 }
             }
             Action::NewEntry => {
-                self.state =
-                    AppState::Unlocked(View::EntryEdit(
-                        EntryEditState::default(),
-                    ));
+                self.state = AppState::Unlocked(View::EntryEdit(
+                    EntryEditState::default(),
+                ));
             }
             Action::EditEntry => {
-                if let Some(summary) = state.entries.get(state.selected) {
+                if let Some(summary) =
+                    state.entries.get(state.selected)
+                {
                     match self.service.get_entry(&summary.id) {
                         Ok(entry) => {
                             self.state =
@@ -349,7 +403,9 @@ impl App {
                                             .username
                                             .clone()
                                             .unwrap_or_default(),
-                                        password: String::new(),
+                                        password: SecretString::new(
+                                            "".into(),
+                                        ),
                                         url: entry
                                             .url
                                             .clone()
@@ -363,30 +419,42 @@ impl App {
                                     },
                                 ));
                         }
-                        Err(e) => self
-                            .show_toast(format!("Error: {e}"), ToastKind::Error),
+                        Err(e) => self.show_toast(
+                            format!("Error: {e}"),
+                            ToastKind::Error,
+                        ),
                     }
                 }
             }
             Action::DeleteEntry => {
-                if let Some(summary) = state.entries.get(state.selected) {
+                if let Some(summary) =
+                    state.entries.get(state.selected)
+                {
                     match self.service.delete_entry(&summary.id) {
                         Ok(()) => {
-                            self.show_toast("Entry deleted", ToastKind::Success);
+                            self.show_toast(
+                                "Entry deleted",
+                                ToastKind::Success,
+                            );
                             self.reload_entries();
                         }
-                        Err(e) => self
-                            .show_toast(format!("Error: {e}"), ToastKind::Error),
+                        Err(e) => self.show_toast(
+                            format!("Error: {e}"),
+                            ToastKind::Error,
+                        ),
                     }
                 }
             }
             Action::CopyPassword => {
-                if let Some(summary) = state.entries.get(state.selected) {
+                if let Some(summary) =
+                    state.entries.get(state.selected)
+                {
                     if let Ok(entry) =
                         self.service.get_entry(&summary.id)
                     {
-                        let pw = entry.password.expose_secret().clone();
-                        Self::copy_to_clipboard(&pw);
+                        let pw =
+                            entry.password.expose_secret().clone();
+                        self.copy_to_clipboard(&pw);
                         self.show_toast(
                             "Password copied — clears in 30s",
                             ToastKind::Success,
@@ -395,12 +463,14 @@ impl App {
                 }
             }
             Action::CopyUsername => {
-                if let Some(summary) = state.entries.get(state.selected) {
+                if let Some(summary) =
+                    state.entries.get(state.selected)
+                {
                     if let Ok(entry) =
                         self.service.get_entry(&summary.id)
                     {
                         if let Some(ref u) = entry.username {
-                            Self::copy_to_clipboard(u);
+                            self.copy_to_clipboard(u);
                             self.show_toast(
                                 "Username copied",
                                 ToastKind::Success,
@@ -410,14 +480,15 @@ impl App {
                 }
             }
             Action::StartSearch => {
-                self.state =
-                    AppState::Unlocked(View::Search(
-                        SearchState::default(),
-                    ));
+                self.state = AppState::Unlocked(View::Search(
+                    SearchState::default(),
+                ));
             }
             Action::Lock => {
+                self.clear_clipboard_now();
                 self.service.lock();
-                self.state = AppState::Locked(LockedState::default());
+                self.state =
+                    AppState::Locked(LockedState::default());
             }
             _ => {}
         }
@@ -426,42 +497,78 @@ impl App {
     // ── Entry detail ─────────────────────────────────────────────────
 
     fn handle_entry_detail(&mut self, action: Action) {
-        let AppState::Unlocked(View::EntryDetail(state)) = &mut self.state
-        else {
-            return;
-        };
-
         match action {
             Action::Back => self.pop_to_list(),
             Action::ToggleVisibility => {
+                let AppState::Unlocked(View::EntryDetail(state)) =
+                    &mut self.state
+                else {
+                    return;
+                };
                 state.show_password = !state.show_password;
             }
             Action::EditEntry => {
-                let entry = &state.entry;
-                self.state =
-                    AppState::Unlocked(View::EntryEdit(EntryEditState {
-                        id: Some(entry.id.clone()),
-                        title: entry.title.clone(),
-                        username: entry.username.clone().unwrap_or_default(),
-                        password: String::new(),
-                        url: entry.url.clone().unwrap_or_default(),
-                        notes: entry.notes.clone().unwrap_or_default(),
+                let edit_state = {
+                    let AppState::Unlocked(View::EntryDetail(state)) =
+                        &self.state
+                    else {
+                        return;
+                    };
+                    EntryEditState {
+                        id: Some(state.entry.id.clone()),
+                        title: state.entry.title.clone(),
+                        username: state
+                            .entry
+                            .username
+                            .clone()
+                            .unwrap_or_default(),
+                        password: SecretString::new("".into()),
+                        url: state
+                            .entry
+                            .url
+                            .clone()
+                            .unwrap_or_default(),
+                        notes: state
+                            .entry
+                            .notes
+                            .clone()
+                            .unwrap_or_default(),
                         active_field: 0,
                         dirty: false,
-                    }));
+                    }
+                };
+                self.state = AppState::Unlocked(View::EntryEdit(edit_state));
             }
             Action::CopyPassword => {
-                let pw = state.entry.password.expose_secret().clone();
-                Self::copy_to_clipboard(&pw);
+                let pw = {
+                    let AppState::Unlocked(View::EntryDetail(ref state)) =
+                        &self.state
+                    else {
+                        return;
+                    };
+                    state.entry.password.expose_secret().clone()
+                };
+                self.copy_to_clipboard(&pw);
                 self.show_toast(
                     "Password copied — clears in 30s",
                     ToastKind::Success,
                 );
             }
             Action::CopyUsername => {
-                if let Some(ref u) = state.entry.username {
-                    Self::copy_to_clipboard(u);
-                    self.show_toast("Username copied", ToastKind::Success);
+                let username = {
+                    let AppState::Unlocked(View::EntryDetail(ref state)) =
+                        &self.state
+                    else {
+                        return;
+                    };
+                    state.entry.username.clone()
+                };
+                if let Some(ref u) = username {
+                    self.copy_to_clipboard(u);
+                    self.show_toast(
+                        "Username copied",
+                        ToastKind::Success,
+                    );
                 }
             }
             _ => {}
@@ -490,7 +597,13 @@ impl App {
                 match state.active_field {
                     0 => state.title.push(c),
                     1 => state.username.push(c),
-                    2 => state.password.push(c),
+                    2 => {
+                        let mut current =
+                            state.password.expose_secret().clone();
+                        current.push(c);
+                        state.password =
+                            SecretString::new(current.into());
+                    }
                     3 => state.url.push(c),
                     4 => state.notes.push(c),
                     _ => {}
@@ -499,11 +612,25 @@ impl App {
             Action::Backspace => {
                 state.dirty = true;
                 match state.active_field {
-                    0 => { state.title.pop(); }
-                    1 => { state.username.pop(); }
-                    2 => { state.password.pop(); }
-                    3 => { state.url.pop(); }
-                    4 => { state.notes.pop(); }
+                    0 => {
+                        state.title.pop();
+                    }
+                    1 => {
+                        state.username.pop();
+                    }
+                    2 => {
+                        let mut current =
+                            state.password.expose_secret().clone();
+                        current.pop();
+                        state.password =
+                            SecretString::new(current.into());
+                    }
+                    3 => {
+                        state.url.pop();
+                    }
+                    4 => {
+                        state.notes.pop();
+                    }
                     _ => {}
                 }
             }
@@ -527,8 +654,9 @@ impl App {
                     } else {
                         Some(std::mem::take(&mut state.username))
                     },
-                    password: secrecy::SecretString::new(
-                        std::mem::take(&mut state.password).into(),
+                    password: std::mem::replace(
+                        &mut state.password,
+                        SecretString::new("".into()),
                     ),
                     url: if state.url.is_empty() {
                         None
@@ -543,7 +671,7 @@ impl App {
                     tags: Vec::new(),
                     custom_fields: Vec::new(),
                     created_at: if state.id.is_some() {
-                        0 // will be ignored for updates
+                        0
                     } else {
                         now
                     },
@@ -558,12 +686,17 @@ impl App {
 
                 match result {
                     Ok(()) => {
-                        self.show_toast("Entry saved", ToastKind::Success);
+                        self.show_toast(
+                            "Entry saved",
+                            ToastKind::Success,
+                        );
                         self.reload_entries();
                         self.pop_to_list();
                     }
-                    Err(e) => self
-                        .show_toast(format!("Error: {e}"), ToastKind::Error),
+                    Err(e) => self.show_toast(
+                        format!("Error: {e}"),
+                        ToastKind::Error,
+                    ),
                 }
             }
             _ => {}
@@ -576,7 +709,8 @@ impl App {
         match action {
             Action::Back => self.pop_to_list(),
             Action::Up | Action::Down => {
-                let AppState::Unlocked(View::Search(state)) = &mut self.state
+                let AppState::Unlocked(View::Search(state)) =
+                    &mut self.state
                 else {
                     return;
                 };
@@ -595,10 +729,10 @@ impl App {
                 }
             }
             Action::CharInput(c) => {
-                // Extract query, push char, run search outside borrow.
                 let query = {
-                    let AppState::Unlocked(View::Search(ref mut state)) =
-                        &mut self.state
+                    let AppState::Unlocked(View::Search(
+                        ref mut state,
+                    )) = &mut self.state
                     else {
                         return;
                     };
@@ -609,8 +743,9 @@ impl App {
             }
             Action::Backspace => {
                 let query = {
-                    let AppState::Unlocked(View::Search(ref mut state)) =
-                        &mut self.state
+                    let AppState::Unlocked(View::Search(
+                        ref mut state,
+                    )) = &mut self.state
                     else {
                         return;
                     };
@@ -639,8 +774,10 @@ impl App {
                                     },
                                 ));
                         }
-                        Err(e) => self
-                            .show_toast(format!("Error: {e}"), ToastKind::Error),
+                        Err(e) => self.show_toast(
+                            format!("Error: {e}"),
+                            ToastKind::Error,
+                        ),
                     }
                 }
             }
@@ -654,21 +791,27 @@ impl App {
         match self.service.list_entries() {
             Ok(entries) => {
                 self.state =
-                    AppState::Unlocked(View::EntryList(EntryListState {
-                        entries,
-                        selected: 0,
-                    }));
+                    AppState::Unlocked(View::EntryList(
+                        EntryListState {
+                            entries,
+                            selected: 0,
+                        },
+                    ));
             }
             Err(e) => {
-                self.show_toast(format!("Error loading entries: {e}"), ToastKind::Error);
+                self.show_toast(
+                    format!("Error loading entries: {e}"),
+                    ToastKind::Error,
+                );
             }
         }
     }
 
     fn reload_entries(&mut self) {
         if let Ok(entries) = self.service.list_entries() {
-            if let AppState::Unlocked(View::EntryList(ref mut list)) =
-                self.state
+            if let AppState::Unlocked(View::EntryList(
+                ref mut list,
+            )) = self.state
             {
                 let old_selected = list.selected;
                 list.entries = entries;
@@ -683,7 +826,9 @@ impl App {
     }
 
     fn run_search_with_query(&mut self, query: &str) {
-        let AppState::Unlocked(View::Search(ref mut state)) = self.state else {
+        let AppState::Unlocked(View::Search(ref mut state)) =
+            self.state
+        else {
             return;
         };
         if query.is_empty() {
@@ -702,20 +847,46 @@ impl App {
         }
     }
 
-    fn copy_to_clipboard(text: &str) {
+    // ── Clipboard ────────────────────────────────────────────────────
+
+    /// Copy text to the system clipboard and schedule an auto-clear after
+    /// 30 seconds. Any previously scheduled clear is aborted first.
+    fn copy_to_clipboard(&mut self, text: &str) {
+        if let Some(handle) = self.clipboard_abort.take() {
+            handle.abort();
+        }
+
         if let Ok(mut board) = arboard::Clipboard::new() {
             if board.set_text(text).is_ok() {
-                let text = text.to_string();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(30))
-                        .await;
+                let owned = text.to_string();
+                let handle = tokio::spawn(async move {
+                    tokio::time::sleep(
+                        std::time::Duration::from_secs(30),
+                    )
+                    .await;
                     if let Ok(mut b) = arboard::Clipboard::new() {
                         let _ = b.set_text("");
                     }
-                    // Drop the owned string so the password is freed.
-                    drop(text);
+                    drop(owned);
                 });
+                self.clipboard_abort = Some(handle.abort_handle());
             }
         }
+    }
+
+    /// Immediately clear the clipboard and abort any scheduled clear task.
+    fn clear_clipboard_now(&mut self) {
+        if let Some(handle) = self.clipboard_abort.take() {
+            handle.abort();
+        }
+        if let Ok(mut board) = arboard::Clipboard::new() {
+            let _ = board.set_text("");
+        }
+    }
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        self.clear_clipboard_now();
     }
 }

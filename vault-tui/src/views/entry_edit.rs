@@ -4,6 +4,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use secrecy::ExposeSecret;
 
 use crate::app::EntryEditState;
 
@@ -20,15 +21,17 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let fields: [(u16, &str, &str); 5] = [
-        (0, "Title", &state.title),
-        (1, "Username", &state.username),
-        (2, "Password", &render_password(&state.password)),
-        (3, "URL", &state.url),
-        (4, "Notes", &state.notes),
+    let pw_display = render_password(state.password.expose_secret());
+
+    let fields: [(u16, &str, String); 5] = [
+        (0, "Title", state.title.clone()),
+        (1, "Username", state.username.clone()),
+        (2, "Password", pw_display),
+        (3, "URL", state.url.clone()),
+        (4, "Notes", state.notes.clone()),
     ];
 
-    // We use a simple vertical stack — one paragraph per field.
+    // Simple vertical stack — one paragraph per field.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -49,7 +52,7 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect) {
         let display = if value.is_empty() {
             format!("<{label}>")
         } else {
-            value.to_string()
+            value.clone()
         };
         let p = Paragraph::new(display)
             .style(Style::default().fg(Color::White))
@@ -81,6 +84,6 @@ fn render_password(pw: &str) -> String {
     if pw.is_empty() {
         String::new()
     } else {
-        "•".repeat(pw.len())
+        "\u{2022}".repeat(pw.len())
     }
 }

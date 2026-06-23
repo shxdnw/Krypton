@@ -4,6 +4,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
+use secrecy::ExposeSecret;
 
 use crate::app::{FirstRunState, LockedState};
 
@@ -15,13 +16,14 @@ pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
 
+    let input_len = state.input.expose_secret().len();
     let display = if state.hidden {
-        "•".repeat(state.input.len())
+        "\u{2022}".repeat(input_len)
     } else {
-        state.input.clone()
+        state.input.expose_secret().clone()
     };
 
-    let mut text = display.clone();
+    let mut text = display;
     if text.is_empty() {
         text = "Enter master password...".into();
     }
@@ -69,12 +71,12 @@ pub fn render_first_run(f: &mut Frame, state: &FirstRunState, area: Rect) {
         "Master Password"
     };
     let input_text = if is_confirm {
-        &state.confirm
+        state.confirm.expose_secret()
     } else {
-        &state.password
+        state.password.expose_secret()
     };
 
-    let display = "•".repeat(input_text.len());
+    let display = "\u{2022}".repeat(input_text.len());
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
