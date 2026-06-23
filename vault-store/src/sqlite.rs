@@ -252,9 +252,17 @@ impl Store for SqliteStore {
             VaultError::Storage(format!("lock poisoned: {e}"))
         })?;
 
-        // Escape FTS5 special characters and wrap in quotes for exact phrase matching.
+        // Prefix/fuzzy search: split into terms, append * to each for
+        // prefix matching. Multi-word queries use implicit AND.
         let escaped = query.replace('"', "\"\"");
-        let fts_query = format!("\"{escaped}\"");
+        let terms: Vec<String> = escaped
+            .split_whitespace()
+            .map(|t| format!("{t}*"))
+            .collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fts_query = terms.join(" ");
 
         let mut stmt = conn
             .prepare(
