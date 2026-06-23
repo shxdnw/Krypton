@@ -1,19 +1,73 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Row, Table, TableState},
     Frame,
 };
+use secrecy::ExposeSecret;
 
 use crate::app::EntryListState;
 
-/// Render the entry list as a table with highlight on the selected row.
-pub fn render(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) {
-    state.table_rect.set(ratatui::layout::Rect {
-        y: area.y + 2, // header + border
-        height: area.height.saturating_sub(3), // header + hint
+/// Render the entry list with an optional preview sidebar on the left.
+pub fn render(
+    f: &mut Frame,
+    state: &EntryListState,
+    area: Rect,
+    accent: Color,
+    sidebar_enabled: bool,
+) {
+    let hint_height = 1u16;
+
+    if sidebar_enabled {
+        let main_area = Rect {
+            height: area.height.saturating_sub(hint_height),
+            ..area
+        };
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+            .split(main_area);
+
+        render_preview(f, state, chunks[0], accent);
+
+        render_table(f, state, chunks[1], accent);
+
+        state.table_rect.set(ratatui::layout::Rect {
+            y: chunks[1].y + 2, // header + border
+            height: chunks[1].height.saturating_sub(3), // header + hint
+            x: chunks[1].x,
+            width: chunks[1].width,
+        });
+    } else {
+        let table_area = Rect {
+            height: area.height.saturating_sub(hint_height),
+            ..area
+        };
+        render_table(f, state, table_area, accent);
+
+        state.table_rect.set(ratatui::layout::Rect {
+            y: table_area.y + 2,
+            height: table_area.height.saturating_sub(3),
+            ..table_area
+        });
+    }
+
+    let hint = Paragraph::new(
+        "[Enter] open  [n] new  [e] edit  [d] delete  [y] copy pw  [/] search  [s] settings  [L] lock  [q] quit",
+    )
+    .style(Style::default().fg(Color::Gray))
+    .alignment(Alignment::Center);
+    let hint_area = Rect {
+        y: area.bottom().saturating_sub(hint_height),
+        height: hint_height,
         ..area
-    });
+    };
+    f.render_widget(hint, hint_area);
+}
+
+/// Render the entries table on the right side.
+fn render_table(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) {
     let header = Row::new(["Title", "Username", "Updated"])
         .style(Style::default().fg(accent).add_modifier(Modifier::BOLD));
 
@@ -23,7 +77,12 @@ pub fn render(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) 
         .map(|e| {
             let username = e.username.clone().unwrap_or_default();
             let updated = relative_time(e.updated_at);
-            Row::new(vec![e.title.clone(), username, updated])
+            // Truncate long values with ellipsis for narrow columns.
+            Row::new(vec![
+                truncate(&e.title, 24),
+                truncate(&username, 18),
+                updated,
+            ])
         })
         .collect();
 
@@ -51,18 +110,93 @@ pub fn render(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) 
         .highlight_symbol("> ");
 
     f.render_stateful_widget(table, area, &mut table_state);
+}
 
-    let hint = Paragraph::new(
-        "[Enter] open  [n] new  [e] edit  [d] delete  [y] copy pw  [/] search  [s] settings  [L] lock  [q] quit",
-    )
-    .style(Style::default().fg(Color::Gray))
-    .alignment(Alignment::Center);
-    let hint_area = Rect {
-        y: area.bottom().saturating_sub(1),
-        height: 1,
-        ..area
+/// Render the preview sidebar on the left.
+fn render_preview(
+    f: &mut Frame,
+    state: &EntryListState,
+    area: Rect,
+    accent: Color,
+) {
+    let block = Block::default()
+        .title("Preview")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(accent));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let entry = match &state.preview_entry {
+        Some(e) => e,
+        None => {
+            let placeholder = Paragraph::new("No entry selected")
+                .style(Style::default().fg(Color::DarkGray));
+            f.render_widget(placeholder, inner);
+            return;
+        }
     };
-    f.render_widget(hint, hint_area);
+
+    let label_style = Style::default().fg(Color::DarkGray);
+    let value_style = Style::default().fg(Color::White);
+    let title_style = Style::default().fg(accent).add_modifier(Modifier::BOLD);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    lines.push(Line::from(Span::styled(
+        truncate(&entry.title, 28),
+        title_style,
+    )));
+    lines.push(Line::from("")); // spacer
+
+    let username = entry.username.as_deref().unwrap_or("\u{2014}");
+    lines.push(Line::from(vec![
+        Span::styled(" Username: ", label_style),
+        Span::styled(username, value_style),
+    ]));
+
+    let pw_display = "\u{2022}".repeat(entry.password.expose_secret().len().max(1));
+    lines.push(Line::from(vec![
+        Span::styled(" Password: ", label_style),
+        Span::styled(pw_display, value_style),
+    ]));
+
+    let url = entry.url.as_deref().unwrap_or("\u{2014}");
+    lines.push(Line::from(vec![
+        Span::styled(" URL:      ", label_style),
+        Span::styled(truncate(url, 24), value_style),
+    ]));
+
+    let notes = entry.notes.as_deref().unwrap_or("\u{2014}");
+    let notes_preview = notes.lines().next().unwrap_or("\u{2014}");
+    lines.push(Line::from(vec![
+        Span::styled(" Notes:    ", label_style),
+        Span::styled(truncate(notes_preview, 24), value_style),
+    ]));
+
+    let tags = if entry.tags.is_empty() {
+        "\u{2014}".into()
+    } else {
+        entry.tags.join(", ")
+    };
+    lines.push(Line::from(vec![
+        Span::styled(" Tags:     ", label_style),
+        Span::styled(truncate(&tags, 24), value_style),
+    ]));
+
+    let preview = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::NONE));
+
+    f.render_widget(preview, inner);
+}
+
+/// Truncate a string to `max` chars, appending "…" if it was cut.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        format!("{}\u{2026}", s.chars().take(max.saturating_sub(1)).collect::<String>())
+    } else {
+        s.to_string()
+    }
 }
 
 /// Convert a Unix timestamp to a relative time string.
