@@ -459,11 +459,17 @@ impl App {
                     {
                         let pw =
                             entry.password.expose_secret().clone();
-                        self.copy_to_clipboard(&pw);
-                        self.show_toast(
-                            "Password copied — clears in 30s",
-                            ToastKind::Success,
-                        );
+                        if self.copy_to_clipboard(&pw) {
+                            self.show_toast(
+                                "Password copied — clears in 30s",
+                                ToastKind::Success,
+                            );
+                        } else {
+                            self.show_toast(
+                                "Clipboard unavailable (is wl-clipboard installed?)",
+                                ToastKind::Error,
+                            );
+                        }
                     }
                 }
             }
@@ -475,11 +481,17 @@ impl App {
                         self.service.get_entry(&summary.id)
                     {
                         if let Some(ref u) = entry.username {
-                            self.copy_to_clipboard(u);
-                            self.show_toast(
-                                "Username copied",
-                                ToastKind::Success,
-                            );
+                            if self.copy_to_clipboard(u) {
+                                self.show_toast(
+                                    "Username copied",
+                                    ToastKind::Success,
+                                );
+                            } else {
+                                self.show_toast(
+                                    "Clipboard unavailable",
+                                    ToastKind::Error,
+                                );
+                            }
                         }
                     }
                 }
@@ -570,11 +582,17 @@ impl App {
                     state.entry.username.clone()
                 };
                 if let Some(ref u) = username {
-                    self.copy_to_clipboard(u);
-                    self.show_toast(
-                        "Username copied",
-                        ToastKind::Success,
-                    );
+                    if self.copy_to_clipboard(u) {
+                        self.show_toast(
+                            "Username copied",
+                            ToastKind::Success,
+                        );
+                    } else {
+                        self.show_toast(
+                            "Clipboard unavailable",
+                            ToastKind::Error,
+                        );
+                    }
                 }
             }
             _ => {}
@@ -856,29 +874,28 @@ impl App {
     // ── Clipboard ────────────────────────────────────────────────────
 
     /// Copy text to the system clipboard and schedule an auto-clear after
-    /// 30 seconds. Any previously scheduled clear is aborted first.
-    fn copy_to_clipboard(&mut self, text: &str) {
+    /// 30 seconds. Falls back to `wl-copy` on Wayland if arboard fails.
+    /// Returns `true` on success so the caller can show feedback.
+    fn copy_to_clipboard(&mut self, text: &str) -> bool {
         // Abort any pending clear.
         if let Some(handle) = self.clipboard_abort.take() {
             handle.abort();
         }
 
-        if let Ok(mut board) = arboard::Clipboard::new() {
-            if board.set_text(text).is_ok() {
-                let owned = text.to_string();
-                let handle = tokio::spawn(async move {
-                    tokio::time::sleep(
-                        std::time::Duration::from_secs(30),
-                    )
-                    .await;
-                    if let Ok(mut b) = arboard::Clipboard::new() {
-                        let _ = b.set_text("");
-                    }
-                    drop(owned);
-                });
-                self.clipboard_abort = Some(handle.abort_handle());
-            }
+        let success = try_clipboard_set(text);
+        if !success {
+            return false;
         }
+
+        let owned = text.to_string();
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            // Best-effort clear — try arboard then wl-copy.
+            let _ = try_clipboard_clear();
+            drop(owned);
+        });
+        self.clipboard_abort = Some(handle.abort_handle());
+        true
     }
 
     /// Immediately clear the clipboard and abort any scheduled clear task.
@@ -886,10 +903,40 @@ impl App {
         if let Some(handle) = self.clipboard_abort.take() {
             handle.abort();
         }
-        if let Ok(mut board) = arboard::Clipboard::new() {
-            let _ = board.set_text("");
+        let _ = try_clipboard_clear();
+    }
+}
+
+// ── Clipboard helpers (free functions to avoid borrow issues) ─────────
+
+/// Try to set the clipboard via arboard, falling back to wl-copy.
+fn try_clipboard_set(text: &str) -> bool {
+    if let Ok(mut board) = arboard::Clipboard::new() {
+        if board.set_text(text).is_ok() {
+            return true;
         }
     }
+    // Wayland fallback: use wl-copy if available.
+    std::process::Command::new("wl-copy")
+        .arg(text)
+        .stdin(std::process::Stdio::piped())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Try to clear the clipboard via arboard, falling back to wl-copy.
+fn try_clipboard_clear() -> bool {
+    if let Ok(mut board) = arboard::Clipboard::new() {
+        if board.set_text("").is_ok() {
+            return true;
+        }
+    }
+    std::process::Command::new("wl-copy")
+        .arg("--clear")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 impl Drop for App {

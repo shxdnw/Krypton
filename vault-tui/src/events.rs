@@ -145,6 +145,9 @@ fn map_entry_edit(key: KeyEvent) -> Option<Action> {
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Enter => Some(Action::NextField),
+        // Arrow keys for field navigation.
+        KeyCode::Down | KeyCode::Right => Some(Action::NextField),
+        KeyCode::Up | KeyCode::Left => Some(Action::PrevField),
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match c {
