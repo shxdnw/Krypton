@@ -5,6 +5,7 @@ use vault_core::{Entry, EntryId, EntrySummary};
 use vault_service::VaultService;
 
 use crate::actions::Action;
+use crate::config::KryptonConfig;
 
 
 #[derive(Debug, Clone)]
@@ -152,6 +153,7 @@ pub enum AppState {
 
 pub struct App {
     pub service: Arc<VaultService>,
+    pub config: KryptonConfig,
     pub state: AppState,
     pub should_quit: bool,
     pub toast: Option<Toast>,
@@ -161,9 +163,14 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(service: Arc<VaultService>, initial_state: AppState) -> Self {
+    pub fn new(
+        service: Arc<VaultService>,
+        config: KryptonConfig,
+        initial_state: AppState,
+    ) -> Self {
         Self {
             service,
+            config,
             state: initial_state,
             should_quit: false,
             toast: None,
@@ -886,9 +893,10 @@ impl App {
             return false;
         }
 
+        let timeout = self.config.clipboard_timeout_secs;
         let owned = zeroize::Zeroizing::new(text.to_string());
         let handle = tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(timeout as u64)).await;
             let _ = try_clipboard_clear();
             drop(owned);
         });
