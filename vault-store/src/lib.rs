@@ -1,1 +1,3 @@
-// vault-store — SQLite-backed persistent storage with FTS5 search
+pub mod sqlite;
+
+pub use sqlite::SqliteStore;
