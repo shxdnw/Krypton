@@ -175,6 +175,7 @@ fn map_entry_edit(key: KeyEvent) -> Option<Action> {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match c {
                     's' => Some(Action::SaveEntry),
+                    'g' => Some(Action::GeneratePassword),
                     _ => Some(Action::CharInput(c)),
                 }
             } else {

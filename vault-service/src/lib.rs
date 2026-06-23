@@ -26,11 +26,12 @@ struct UnlockedSession {
 pub struct VaultService {
     store_path: PathBuf,
     deriver: Arc<dyn KeyDeriver>,
-    extensions: Arc<vault_ext::Registry>,
     session: RwLock<Option<UnlockedSession>>,
     /// When true, title/username/url are stored as "[encrypted]" in
     /// plaintext columns (the real values live inside the encrypted blob).
     pub encrypt_metadata: AtomicBool,
+    /// Extension registry — generators, hooks, importers.
+    pub extensions: Arc<vault_ext::Registry>,
 }
 
 impl VaultService {
