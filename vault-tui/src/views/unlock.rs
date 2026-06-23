@@ -9,7 +9,7 @@ use secrecy::ExposeSecret;
 use crate::app::{FirstRunState, LockedState};
 
 /// Render the unlock screen (existing vault, enter password).
-pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect) {
+pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect, _accent: Color) {
     let area = centered_rect(60, 10, area);
     let block = Block::default()
         .title("krypton")
@@ -57,7 +57,7 @@ pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect) {
 }
 
 /// Render the first-run screen (create master password).
-pub fn render_first_run(f: &mut Frame, state: &FirstRunState, area: Rect) {
+pub fn render_first_run(f: &mut Frame, state: &FirstRunState, area: Rect, _accent: Color) {
     let area = centered_rect(60, 12, area);
     let block = Block::default()
         .title("krypton — Create Master Password")

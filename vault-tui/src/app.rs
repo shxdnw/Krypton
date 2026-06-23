@@ -8,6 +8,14 @@ use vault_service::VaultService;
 use crate::actions::Action;
 use crate::config::KryptonConfig;
 
+// ── ConfirmAction ─────────────────────────────────────────────────────────
+
+/// A pending destructive action that needs a second confirmation.
+#[derive(Debug, Clone)]
+pub enum ConfirmAction {
+    DeleteEntry(EntryId),
+}
+
 // ── Toast ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -324,6 +332,8 @@ pub struct App {
     pub toast_ticks: u8,
     /// Handle to abort the clipboard-clear timer so we can wipe on lock/quit.
     clipboard_abort: Option<tokio::task::AbortHandle>,
+    /// Pending confirmation for a destructive action.
+    pub confirm_action: Option<ConfirmAction>,
 }
 
 impl App {
@@ -340,6 +350,7 @@ impl App {
             toast: None,
             toast_ticks: 0,
             clipboard_abort: None,
+            confirm_action: None,
         }
     }
 
@@ -357,6 +368,19 @@ impl App {
             if self.toast_ticks == 0 {
                 self.toast = None;
             }
+        }
+    }
+
+    /// Resolve the configured accent color to a ratatui [`Color`].
+    pub fn accent_color(&self) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        match self.config.accent_color.as_str() {
+            "Green" => Color::Green,
+            "Yellow" => Color::Yellow,
+            "Blue" => Color::Blue,
+            "Magenta" => Color::Magenta,
+            "White" => Color::White,
+            _ => Color::Cyan,
         }
     }
 
@@ -518,6 +542,11 @@ impl App {
             return;
         };
 
+        // Clear pending confirmation on any action other than DeleteEntry.
+        if !matches!(action, Action::DeleteEntry) {
+            self.confirm_action = None;
+        }
+
         match action {
             Action::Up => {
                 if state.selected > 0 {
@@ -610,23 +639,61 @@ impl App {
                 }
             }
             Action::DeleteEntry => {
-                if let Some(summary) =
-                    state.entries.get(state.selected)
-                {
-                    match self.service.delete_entry(&summary.id) {
-                        Ok(()) => {
-                            self.show_toast(
-                                "Entry deleted",
-                                ToastKind::Success,
-                            );
-                            self.reload_entries();
+                if !self.config.confirm_before_delete {
+                    // No confirmation needed — delete immediately.
+                    if let Some(summary) =
+                        state.entries.get(state.selected)
+                    {
+                        match self.service.delete_entry(&summary.id) {
+                            Ok(()) => {
+                                self.show_toast(
+                                    "Entry deleted",
+                                    ToastKind::Success,
+                                );
+                                self.reload_entries();
+                            }
+                            Err(e) => self.show_toast(
+                                format!("Error: {e}"),
+                                ToastKind::Error,
+                            ),
                         }
-                        Err(e) => self.show_toast(
-                            format!("Error: {e}"),
-                            ToastKind::Error,
-                        ),
+                    }
+                } else if let Some(summary) =
+                    state.entries.get(state.selected).cloned()
+                {
+                    match self.confirm_action.take() {
+                        Some(ConfirmAction::DeleteEntry(ref expected_id))
+                            if expected_id == &summary.id =>
+                        {
+                            // Second press — confirmed.
+                            match self.service.delete_entry(&summary.id) {
+                                Ok(()) => {
+                                    self.show_toast(
+                                        "Entry deleted",
+                                        ToastKind::Success,
+                                    );
+                                    self.reload_entries();
+                                }
+                                Err(e) => self.show_toast(
+                                    format!("Error: {e}"),
+                                    ToastKind::Error,
+                                ),
+                            }
+                        }
+                        _ => {
+                            // First press — ask for confirmation.
+                            self.confirm_action =
+                                Some(ConfirmAction::DeleteEntry(
+                                    summary.id.clone(),
+                                ));
+                            self.show_toast(
+                                "Press d again to confirm delete, Esc to cancel",
+                                ToastKind::Info,
+                            );
+                        }
                     }
                 }
+                return; // skip the confirm_action clear below
             }
             Action::CopyPassword => {
                 if let Some(summary) =

@@ -8,10 +8,11 @@ use secrecy::ExposeSecret;
 
 use crate::app::EntryDetailState;
 
-pub fn render(f: &mut Frame, state: &EntryDetailState, area: Rect) {
+pub fn render(f: &mut Frame, state: &EntryDetailState, area: Rect, _accent: Color) {
     let block = Block::default()
         .title(state.entry.title.as_str())
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(_accent));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

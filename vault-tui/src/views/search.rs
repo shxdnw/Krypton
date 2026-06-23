@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::SearchState;
 
-pub fn render(f: &mut Frame, state: &SearchState, area: Rect) {
+pub fn render(f: &mut Frame, state: &SearchState, area: Rect, accent: Color) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
@@ -32,7 +32,7 @@ pub fn render(f: &mut Frame, state: &SearchState, area: Rect) {
             Block::default()
                 .title("Search")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(accent)),
         );
     f.render_widget(search_bar, chunks[0]);
 
@@ -48,7 +48,7 @@ pub fn render(f: &mut Frame, state: &SearchState, area: Rect) {
         .collect();
 
     let highlight = Style::default()
-        .fg(Color::Yellow)
+        .fg(accent)
         .add_modifier(Modifier::REVERSED);
 
     let list = List::new(items)
