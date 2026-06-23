@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
 use vault_core::{Cipher, Entry, EntryId, EntrySummary, KeyDeriver, Result, Store, VaultError};
@@ -28,6 +28,9 @@ pub struct VaultService {
     deriver: Arc<dyn KeyDeriver>,
     extensions: Arc<vault_ext::Registry>,
     session: RwLock<Option<UnlockedSession>>,
+    /// When true, title/username/url are stored as "[encrypted]" in
+    /// plaintext columns (the real values live inside the encrypted blob).
+    pub encrypt_metadata: AtomicBool,
 }
 
 impl VaultService {
@@ -41,6 +44,7 @@ impl VaultService {
             deriver,
             extensions,
             session: RwLock::new(None),
+            encrypt_metadata: AtomicBool::new(false),
         }
     }
 
@@ -144,7 +148,15 @@ impl VaultService {
     // ── CRUD ──────────────────────────────────────────────────────────
 
     pub fn list_entries(&self) -> Result<Vec<EntrySummary>> {
-        self.require_session()?.list_entries()
+        let mut entries = self.require_session()?.list_entries()?;
+        if self.encrypt_metadata.load(std::sync::atomic::Ordering::Relaxed) {
+            for e in &mut entries {
+                e.title = "[encrypted]".into();
+                e.username = None;
+                e.url = None;
+            }
+        }
+        Ok(entries)
     }
 
     pub fn get_entry(&self, id: &EntryId) -> Result<Entry> {

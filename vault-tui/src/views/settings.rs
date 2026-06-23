@@ -5,7 +5,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{SettingValue, SettingsState};
+use crate::app::SettingsState;
 
 pub fn render(f: &mut Frame, state: &SettingsState, area: Rect) {
     let block = Block::default()
@@ -15,22 +15,10 @@ pub fn render(f: &mut Frame, state: &SettingsState, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let items: Vec<ListItem> = state
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, field)| {
-            let value_str = match &field.value {
-                SettingValue::Bool(v) => {
-                    if *v { "[x]" } else { "[ ]" }.to_string()
-                }
-                SettingValue::Number(n) => n.to_string(),
-                SettingValue::String(s) => s.clone(),
-                SettingValue::Choice { options, selected } => {
-                    format!("{}", options.get(*selected).unwrap_or(&"?"))
-                }
-            };
-            let line = format!("  {}: {}", field.label, value_str);
+    let items: Vec<ListItem> = (0..state.len())
+        .map(|i| {
+            let (label, value) = state.row(i);
+            let line = format!("  {}: {}", label, value);
             if i == state.selected {
                 ListItem::new(line).style(
                     Style::default()
@@ -43,21 +31,24 @@ pub fn render(f: &mut Frame, state: &SettingsState, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::NONE));
+    let list =
+        List::new(items).block(Block::default().borders(Borders::NONE));
 
     f.render_widget(list, inner);
 
     // Bottom bar.
-    let hint = Paragraph::new(
-        "[j/k] navigate  [Enter/Space] toggle  [Ctrl+S] save  [Esc] back",
-    )
-    .style(Style::default().fg(Color::Gray))
-    .alignment(Alignment::Center);
+    let hint = if state.editing_number {
+        "[Enter] confirm  [Esc] cancel"
+    } else {
+        "[j/k] navigate  [Enter/Space] toggle/edit  [Ctrl+S] save  [Esc] back"
+    };
+    let hint_p = Paragraph::new(hint)
+        .style(Style::default().fg(Color::Gray))
+        .alignment(Alignment::Center);
     let hint_area = Rect {
         y: area.bottom().saturating_sub(1),
         height: 1,
         ..area
     };
-    f.render_widget(hint, hint_area);
+    f.render_widget(hint_p, hint_area);
 }

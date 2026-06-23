@@ -187,27 +187,95 @@ impl Default for SearchState {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // fully wired in Step 5
 pub struct SettingsState {
-    pub fields: Vec<SettingField>,
+    /// Working copy of the config being edited.
+    pub config: KryptonConfig,
+    /// Index of the currently selected setting row.
     pub selected: usize,
+    /// When true, we're editing a numeric field (clipboard timeout).
+    pub editing_number: bool,
+    /// Buffer for numeric input.
+    pub number_buffer: String,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // fully wired in Step 5
-pub struct SettingField {
-    pub label: &'static str,
-    pub key: &'static str,
-    pub value: SettingValue,
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self {
+            config: KryptonConfig::default(),
+            selected: 0,
+            editing_number: false,
+            number_buffer: String::new(),
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // fully wired in Step 5
-pub enum SettingValue {
-    Bool(bool),
-    Number(u32),
-    String(String),
-    Choice { options: Vec<&'static str>, selected: usize },
+impl SettingsState {
+    /// Number of setting rows.
+    pub fn len(&self) -> usize { 9 }
+
+    /// Get the display label and value string for row `i`.
+    pub fn row(&self, i: usize) -> (String, String) {
+        match i {
+            0 => ("Encrypt metadata".into(), fmt_bool(self.config.encrypt_metadata)),
+            1 => ("Clipboard timeout (s)".into(), {
+                if self.editing_number && self.selected == 1 {
+                    format!("{}_", self.number_buffer)
+                } else {
+                    self.config.clipboard_timeout_secs.to_string()
+                }
+            }),
+            2 => ("Confirm before delete".into(), fmt_bool(self.config.confirm_before_delete)),
+            3 => ("Password length".into(), self.config.password_length.to_string()),
+            4 => ("Uppercase".into(), fmt_bool(self.config.password_uppercase)),
+            5 => ("Lowercase".into(), fmt_bool(self.config.password_lowercase)),
+            6 => ("Digits".into(), fmt_bool(self.config.password_digits)),
+            7 => ("Symbols".into(), fmt_bool(self.config.password_symbols)),
+            8 => ("Relative timestamps".into(), fmt_bool(self.config.relative_timestamps)),
+            _ => ("".into(), "".into()),
+        }
+    }
+
+    /// Toggle the boolean at row `i`, if it's a boolean field.
+    pub fn toggle(&mut self, i: usize) {
+        match i {
+            0 => self.config.encrypt_metadata = !self.config.encrypt_metadata,
+            2 => self.config.confirm_before_delete = !self.config.confirm_before_delete,
+            4 => self.config.password_uppercase = !self.config.password_uppercase,
+            5 => self.config.password_lowercase = !self.config.password_lowercase,
+            6 => self.config.password_digits = !self.config.password_digits,
+            7 => self.config.password_symbols = !self.config.password_symbols,
+            8 => self.config.relative_timestamps = !self.config.relative_timestamps,
+            _ => {}
+        }
+    }
+
+    /// Enter number editing mode for rows that support it.
+    pub fn start_edit(&mut self) {
+        if self.selected == 1 {
+            self.editing_number = true;
+            self.number_buffer = self.config.clipboard_timeout_secs.to_string();
+        } else if self.selected == 3 {
+            self.editing_number = true;
+            self.number_buffer = self.config.password_length.to_string();
+        }
+    }
+
+    /// Commit number editing and update the config.
+    pub fn commit_number(&mut self) {
+        if let Ok(v) = self.number_buffer.parse::<u32>() {
+            match self.selected {
+                1 => self.config.clipboard_timeout_secs = v.clamp(5, 300),
+                3 => self.config.password_length = v.clamp(4, 128) as usize,
+                _ => {}
+            }
+        }
+        self.editing_number = false;
+        self.number_buffer.clear();
+    }
+}
+
+fn fmt_bool(b: bool) -> String {
+    if b { "[x]" } else { "[ ]" }.into()
 }
 
 // ── View enum ────────────────────────────────────────────────────────────
@@ -592,6 +660,7 @@ impl App {
                     }
                 }
             }
+            Action::OpenSettings => self.open_settings(),
             Action::StartSearch => {
                 self.state = AppState::Unlocked(View::Search(
                     SearchState::default(),
@@ -973,17 +1042,70 @@ impl App {
 
     // ── Settings ─────────────────────────────────────────────────────
 
+    fn open_settings(&mut self) {
+        self.state = AppState::Unlocked(View::Settings(SettingsState {
+            config: self.config.clone(),
+            ..SettingsState::default()
+        }));
+    }
+
     fn handle_settings(&mut self, action: Action) {
         let AppState::Unlocked(View::Settings(state)) = &mut self.state
         else { return };
+
         match action {
-            Action::Back => self.pop_to_list(),
+            Action::Back => {
+                if state.editing_number {
+                    state.editing_number = false;
+                    state.number_buffer.clear();
+                } else {
+                    self.pop_to_list();
+                }
+            }
             Action::Up => {
-                if state.selected > 0 { state.selected -= 1; }
+                if !state.editing_number && state.selected > 0 {
+                    state.selected -= 1;
+                }
             }
             Action::Down => {
-                if state.selected + 1 < state.fields.len() {
+                if !state.editing_number && state.selected + 1 < state.len() {
                     state.selected += 1;
+                }
+            }
+            Action::ToggleSetting => {
+                if state.editing_number {
+                    state.commit_number();
+                } else if matches!(state.selected, 1 | 3) {
+                    state.start_edit();
+                } else {
+                    state.toggle(state.selected);
+                }
+            }
+            Action::CharInput(c) => {
+                if state.editing_number {
+                    state.number_buffer.push(c);
+                }
+            }
+            Action::Backspace => {
+                if state.editing_number {
+                    state.number_buffer.pop();
+                }
+            }
+            Action::SaveEntry => {
+                if state.editing_number {
+                    state.commit_number();
+                }
+                // Persist to disk.
+                if let Err(e) = state.config.save() {
+                    self.show_toast(format!("Save failed: {e}"), ToastKind::Error);
+                } else {
+                    self.config = state.config.clone();
+                    self.service.encrypt_metadata.store(
+                        self.config.encrypt_metadata,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    self.show_toast("Settings saved", ToastKind::Success);
+                    self.pop_to_list();
                 }
             }
             _ => {}
