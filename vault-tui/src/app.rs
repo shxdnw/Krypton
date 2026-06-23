@@ -560,11 +560,17 @@ impl App {
                     };
                     state.entry.password.expose_secret().clone()
                 };
-                self.copy_to_clipboard(&pw);
-                self.show_toast(
-                    "Password copied — clears in 30s",
-                    ToastKind::Success,
-                );
+                if self.copy_to_clipboard(&pw) {
+                    self.show_toast(
+                        "Password copied — clears in 30s",
+                        ToastKind::Success,
+                    );
+                } else {
+                    self.show_toast(
+                        "Clipboard unavailable (is wl-clipboard installed?)",
+                        ToastKind::Error,
+                    );
+                }
             }
             Action::CopyUsername => {
                 let username = {
@@ -880,10 +886,9 @@ impl App {
             return false;
         }
 
-        let owned = text.to_string();
+        let owned = zeroize::Zeroizing::new(text.to_string());
         let handle = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            // Best-effort clear — try arboard then wl-copy.
             let _ = try_clipboard_clear();
             drop(owned);
         });
@@ -900,36 +905,84 @@ impl App {
     }
 }
 
-// ── Clipboard helpers (free functions to avoid borrow issues) ─────────
+// ── Clipboard helpers (free functions) ───────────────────────────────
 
-/// Try to set the clipboard via arboard, falling back to wl-copy.
-fn try_clipboard_set(text: &str) -> bool {
-    if let Ok(mut board) = arboard::Clipboard::new() {
-        if board.set_text(text).is_ok() {
-            return true;
-        }
-    }
-    // Wayland fallback: use wl-copy if available.
-    std::process::Command::new("wl-copy")
-        .arg(text)
+/// Pipe `text` via stdin to a clipboard command — never via argv, avoiding
+/// `/proc/*/cmdline` exposure.
+fn try_clipboard_cmd(cmd: &str, text: &str) -> bool {
+    use std::io::Write;
+    std::process::Command::new(cmd)
         .stdin(std::process::Stdio::piped())
-        .output()
-        .map(|o| o.status.success())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()
+        .and_then(|mut child| {
+            let mut stdin = child.stdin.take()?;
+            stdin.write_all(text.as_bytes()).ok()?;
+            drop(stdin); // close pipe so child sees EOF
+            child.wait().ok().map(|s| s.success())
+        })
         .unwrap_or(false)
 }
 
-/// Try to clear the clipboard via arboard, falling back to wl-copy.
-fn try_clipboard_clear() -> bool {
+/// Store current clipboard in cliphist if available.
+fn try_cliphist_store() -> bool {
+    std::process::Command::new("cliphist")
+        .arg("store")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Try to set the clipboard via arboard, falling back to wl-copy or xclip.
+fn try_clipboard_set(text: &str) -> bool {
     if let Ok(mut board) = arboard::Clipboard::new() {
-        if board.set_text("").is_ok() {
+        if board.set_text(text).is_ok() {
+            let _ = try_cliphist_store();
             return true;
         }
     }
-    std::process::Command::new("wl-copy")
+    // Pipe via stdin — never argv.
+    if try_clipboard_cmd("wl-copy", text) {
+        return true;
+    }
+    if try_clipboard_cmd("xclip", text) {
+        return true;
+    }
+    false
+}
+
+/// Clear the system clipboard and cliphist history.
+fn try_clipboard_clear() -> bool {
+    let mut ok = false;
+    if let Ok(mut board) = arboard::Clipboard::new() {
+        ok |= board.set_text("").is_ok();
+    }
+    if std::process::Command::new("wl-copy")
         .arg("--clear")
-        .output()
-        .map(|o| o.status.success())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
         .unwrap_or(false)
+    {
+        ok = true;
+    }
+    if std::process::Command::new("cliphist")
+        .arg("wipe")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        ok = true;
+    }
+    ok
 }
 
 impl Drop for App {
