@@ -1,7 +1,9 @@
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -17,14 +19,22 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn setup() -> io::Result<Self> {
         enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen)?;
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture
+        )?;
         Ok(Self)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = disable_raw_mode();
     }
 }
@@ -47,10 +57,18 @@ pub async fn run(app: &mut App) -> color_eyre::Result<()> {
         }
 
         if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if let Some(action) = map_key_to_action(&app.state, key) {
-                    app.handle_action(action);
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(action) = map_key_to_action(&app.state, key) {
+                        app.handle_action(action);
+                    }
                 }
+                Event::Mouse(mouse) => {
+                    if let Some(action) = map_mouse_to_action(mouse) {
+                        app.handle_action(action);
+                    }
+                }
+                _ => {}
             }
         } else {
             app.handle_action(Action::Tick);
@@ -71,6 +89,7 @@ fn map_key_to_action(state: &AppState, key: KeyEvent) -> Option<Action> {
             View::EntryDetail(_) => map_entry_detail(key),
             View::EntryEdit(_) => map_entry_edit(key),
             View::Search(_) => map_search(key),
+            View::Settings(_) => map_settings(key),
         },
     }
 }
@@ -110,9 +129,10 @@ fn map_entry_list(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('d') => Some(Action::DeleteEntry),
         KeyCode::Char('y') => Some(Action::CopyPassword),
         KeyCode::Char('/') => Some(Action::StartSearch),
+        KeyCode::Char('s') => Some(Action::OpenSettings),
         KeyCode::Char('L') => Some(Action::Lock),
-        KeyCode::Char('g') => Some(Action::PageUp),   // top of list
-        KeyCode::Char('G') => Some(Action::PageDown), // bottom of list
+        KeyCode::Char('g') => Some(Action::PageUp),
+        KeyCode::Char('G') => Some(Action::PageDown),
         KeyCode::PageUp => Some(Action::PageUp),
         KeyCode::PageDown => Some(Action::PageDown),
         _ => None,
@@ -164,6 +184,38 @@ fn map_search(key: KeyEvent) -> Option<Action> {
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Up),
         KeyCode::Enter => Some(Action::Select),
         KeyCode::Char(c) => Some(Action::CharInput(c)),
+        _ => None,
+    }
+}
+
+
+fn map_settings(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc => Some(Action::Back),
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::Down),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::Up),
+        KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ToggleSetting),
+        KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) && c == 's' {
+                Some(Action::SaveEntry) // reuse SaveEntry for "save settings"
+            } else {
+                Some(Action::CharInput(c))
+            }
+        }
+        _ => None,
+    }
+}
+
+
+use crossterm::event::MouseEvent;
+
+fn map_mouse_to_action(mouse: MouseEvent) -> Option<Action> {
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            Some(Action::Click(mouse.column, mouse.row))
+        }
+        MouseEventKind::ScrollDown => Some(Action::Down),
+        MouseEventKind::ScrollUp => Some(Action::Up),
         _ => None,
     }
 }

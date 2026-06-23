@@ -2,6 +2,7 @@ pub mod entry_detail;
 pub mod entry_edit;
 pub mod entry_list;
 pub mod search;
+pub mod settings;
 pub mod unlock;
 
 use ratatui::{
@@ -23,6 +24,7 @@ pub fn render(app: &App, f: &mut Frame) {
             crate::app::View::EntryDetail(state) => entry_detail::render(f, state, f.area()),
             crate::app::View::EntryEdit(state) => entry_edit::render(f, state, f.area()),
             crate::app::View::Search(state) => search::render(f, state, f.area()),
+            crate::app::View::Settings(state) => settings::render(f, state, f.area()),
         },
     }
 

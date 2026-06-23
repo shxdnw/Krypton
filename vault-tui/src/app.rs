@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::sync::Arc;
 
 use secrecy::{ExposeSecret, SecretString};
@@ -74,10 +75,30 @@ pub enum FirstRunStep {
     ConfirmPassword,
 }
 
-#[derive(Debug, Clone)]
 pub struct EntryListState {
     pub entries: Vec<EntrySummary>,
     pub selected: usize,
+    /// Layout rect of the table body for mouse hit-testing.
+    pub table_rect: Cell<ratatui::layout::Rect>,
+}
+
+// Manual impl — Cell is !Debug + !Clone
+impl std::fmt::Debug for EntryListState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EntryListState")
+            .field("entries", &self.entries)
+            .field("selected", &self.selected)
+            .finish()
+    }
+}
+impl Clone for EntryListState {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            selected: self.selected,
+            table_rect: Cell::new(self.table_rect.get()),
+        }
+    }
 }
 
 impl Default for EntryListState {
@@ -85,6 +106,7 @@ impl Default for EntryListState {
         Self {
             entries: Vec::new(),
             selected: 0,
+            table_rect: Cell::new(ratatui::layout::Rect::default()),
         }
     }
 }
@@ -126,20 +148,75 @@ impl Default for EntryEditState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
 pub struct SearchState {
     pub query: String,
     pub results: Vec<EntrySummary>,
     pub selected: usize,
+    pub result_rect: Cell<ratatui::layout::Rect>,
+}
+impl std::fmt::Debug for SearchState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SearchState")
+            .field("query", &self.query)
+            .field("results", &self.results)
+            .field("selected", &self.selected)
+            .finish()
+    }
+}
+impl Clone for SearchState {
+    fn clone(&self) -> Self {
+        Self {
+            query: self.query.clone(),
+            results: self.results.clone(),
+            selected: self.selected,
+            result_rect: Cell::new(self.result_rect.get()),
+        }
+    }
+}
+impl Default for SearchState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            results: Vec::new(),
+            selected: 0,
+            result_rect: Cell::new(ratatui::layout::Rect::default()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // fully wired in Step 5
+pub struct SettingsState {
+    pub fields: Vec<SettingField>,
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // fully wired in Step 5
+pub struct SettingField {
+    pub label: &'static str,
+    pub key: &'static str,
+    pub value: SettingValue,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // fully wired in Step 5
+pub enum SettingValue {
+    Bool(bool),
+    Number(u32),
+    String(String),
+    Choice { options: Vec<&'static str>, selected: usize },
 }
 
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Settings variant wired in Step 5
 pub enum View {
     EntryList(EntryListState),
     EntryDetail(EntryDetailState),
     EntryEdit(EntryEditState),
     Search(SearchState),
+    Settings(SettingsState),
 }
 
 
@@ -217,6 +294,7 @@ impl App {
                 View::EntryDetail(_) => self.handle_entry_detail(action),
                 View::EntryEdit(_) => self.handle_entry_edit(action),
                 View::Search(_) => self.handle_search(action),
+                View::Settings(_) => self.handle_settings(action),
             },
         }
     }
@@ -278,6 +356,7 @@ impl App {
                                     EntryListState {
                                         entries,
                                         selected: 0,
+                                        table_rect: Cell::new(ratatui::layout::Rect::default()),
                                     },
                                 ));
                         }
@@ -323,6 +402,7 @@ impl App {
                                     EntryListState {
                                         entries,
                                         selected: 0,
+                                        table_rect: Cell::new(ratatui::layout::Rect::default()),
                                     },
                                 ));
                         }
@@ -368,6 +448,15 @@ impl App {
             Action::PageDown => {
                 let len = state.entries.len().saturating_sub(1);
                 state.selected = (state.selected + 10).min(len);
+            }
+            Action::Click(_col, row) => {
+                let r = state.table_rect.get();
+                if r.height > 0 && row >= r.y && row < r.y + r.height {
+                    let idx = (row - r.y) as usize;
+                    if idx < state.entries.len() {
+                        state.selected = idx;
+                    }
+                }
             }
             Action::Select => {
                 if let Some(summary) =
@@ -785,6 +874,24 @@ impl App {
                 };
                 self.run_search_with_query(&query);
             }
+            Action::Click(_col, row) => {
+                let target_idx = {
+                    let AppState::Unlocked(View::Search(ref state)) = self.state
+                    else { return };
+                    let r = state.result_rect.get();
+                    if r.height > 0 && row >= r.y && row < r.y + r.height {
+                        let idx = (row - r.y) as usize;
+                        if idx < state.results.len() { Some(idx) } else { None }
+                    } else { None }
+                };
+                if let Some(idx) = target_idx {
+                    let AppState::Unlocked(View::Search(ref mut s)) = self.state
+                    else { return };
+                    if idx < s.results.len() {
+                        s.selected = idx;
+                    }
+                }
+            }
             Action::Select => {
                 let summary_opt = {
                     let AppState::Unlocked(View::Search(ref state)) =
@@ -826,6 +933,7 @@ impl App {
                         EntryListState {
                             entries,
                             selected: 0,
+                            table_rect: Cell::new(ratatui::layout::Rect::default()),
                         },
                     ));
             }
@@ -853,6 +961,25 @@ impl App {
                     list.selected = old_selected;
                 }
             }
+        }
+    }
+
+    // ── Settings ─────────────────────────────────────────────────────
+
+    fn handle_settings(&mut self, action: Action) {
+        let AppState::Unlocked(View::Settings(state)) = &mut self.state
+        else { return };
+        match action {
+            Action::Back => self.pop_to_list(),
+            Action::Up => {
+                if state.selected > 0 { state.selected -= 1; }
+            }
+            Action::Down => {
+                if state.selected + 1 < state.fields.len() {
+                    state.selected += 1;
+                }
+            }
+            _ => {}
         }
     }
 
