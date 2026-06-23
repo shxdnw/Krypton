@@ -1638,6 +1638,7 @@ dependencies = [
  "uuid",
  "vault-core",
  "vault-crypto",
+ "zeroize",
 ]
 
 [[package]]

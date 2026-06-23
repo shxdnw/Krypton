@@ -205,14 +205,22 @@ impl From<&Entry> for EntryData {
 }
 
 impl EntryData {
+    /// Move the password out of `self`, leaving an empty (zeroized) String
+    /// behind so the Drop impl has nothing sensitive to clear.
+    fn take_password(&mut self) -> String {
+        std::mem::replace(&mut self.password, String::new())
+    }
+
     /// Reconstruct a runtime [`Entry`] with the password wrapped in
-    /// [`SecretString`].
-    pub fn into_entry(self) -> Entry {
+    /// [`SecretString`]. The password is moved (not cloned) so only one
+    /// copy exists in memory at a time.
+    pub fn into_entry(mut self) -> Entry {
+        let password = self.take_password();
         Entry {
             id: self.id.clone(),
             title: self.title.clone(),
             username: self.username.clone(),
-            password: SecretString::new(self.password.clone().into()),
+            password: SecretString::new(password.into()),
             url: self.url.clone(),
             notes: self.notes.clone(),
             tags: self.tags.clone(),

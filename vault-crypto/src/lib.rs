@@ -46,11 +46,18 @@ impl KeyDeriver for Argon2IdDeriver {
 }
 
 
-/// Authenticated encryption using XChaCha20-Poly1305.
+/// Authenticated encryption using ChaCha20-Poly1305.
 ///
 /// Ciphertext format: `[12-byte nonce][encrypted data + 16-byte tag]`
+///
+/// A copy of the key is held in a [`Zeroizing`] wrapper so it is scrubbed
+/// from memory when the cipher is dropped (e.g. on vault lock).
 pub struct ChaCha20Cipher {
     aead: ChaCha20Poly1305,
+    /// Retained copy of the key for explicit zeroization on drop.
+    /// The `ChaCha20Poly1305` object internally copies the key, but its
+    /// `Drop` does not zeroize — we hold this so we can guarantee it.
+    _key: zeroize::Zeroizing<[u8; 32]>,
 }
 
 impl ChaCha20Cipher {
@@ -58,6 +65,7 @@ impl ChaCha20Cipher {
         Self {
             aead: ChaCha20Poly1305::new_from_slice(key)
                 .expect("ChaCha20Poly1305 key is exactly 32 bytes"),
+            _key: zeroize::Zeroizing::new(*key),
         }
     }
 }

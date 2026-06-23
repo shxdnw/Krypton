@@ -155,7 +155,7 @@ impl Store for SqliteStore {
             .query_row(params![id_str], |row| row.get(0))
             .map_err(|_| VaultError::NotFound(id_str))?;
 
-        let plain = self.cipher.decrypt(&blob)?;
+        let plain = zeroize::Zeroizing::new(self.cipher.decrypt(&blob)?);
         let entry_data: vault_core::EntryData = serde_json::from_slice(&plain)
             .map_err(|e| VaultError::Storage(format!("deserialize: {e}")))?;
         Ok(entry_data.into_entry())
@@ -167,9 +167,12 @@ impl Store for SqliteStore {
         })?;
 
         let data = vault_core::EntryData::from(entry);
-        let json = serde_json::to_vec(&data)
-            .map_err(|e| VaultError::Storage(format!("serialize: {e}")))?;
+        let json = zeroize::Zeroizing::new(
+            serde_json::to_vec(&data)
+                .map_err(|e| VaultError::Storage(format!("serialize: {e}")))?,
+        );
         let blob = self.cipher.encrypt(&json)?;
+        drop(data);
         let tags_json = serde_json::to_string(&entry.tags).unwrap_or_else(|_| "[]".into());
 
         conn.execute(
@@ -197,9 +200,12 @@ impl Store for SqliteStore {
         })?;
 
         let data = vault_core::EntryData::from(entry);
-        let json = serde_json::to_vec(&data)
-            .map_err(|e| VaultError::Storage(format!("serialize: {e}")))?;
+        let json = zeroize::Zeroizing::new(
+            serde_json::to_vec(&data)
+                .map_err(|e| VaultError::Storage(format!("serialize: {e}")))?,
+        );
         let blob = self.cipher.encrypt(&json)?;
+        drop(data);
         let tags_json = serde_json::to_string(&entry.tags).unwrap_or_else(|_| "[]".into());
 
         let affected = conn
