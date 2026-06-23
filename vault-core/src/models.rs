@@ -1,8 +1,10 @@
 use chrono::Utc;
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use uuid::Uuid;
+
+// ── EntryId ──────────────────────────────────────────────────────────────
 
 /// Unique identifier for a vault entry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -20,14 +22,75 @@ impl fmt::Display for EntryId {
     }
 }
 
+// ── FieldValue (with manual serde for SecretString safety) ───────────────
+
 /// Typed value of a custom field.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// The `Secret` variant wraps [`SecretString`] so its contents are redacted
+/// from logs and zeroized on drop. Manual `Serialize` / `Deserialize`
+/// implementations expose the secret only during the brief window when the
+/// entry is being serialised into the encrypted blob.
+#[derive(Clone)]
 pub enum FieldValue {
     Text(String),
-    /// A secret value — stored as plaintext only within the encrypted blob.
-    Secret(String),
+    Secret(SecretString),
     Totp(String),
 }
+
+impl fmt::Debug for FieldValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(v) => f.debug_tuple("Text").field(v).finish(),
+            Self::Secret(_) => f.write_str("Secret([REDACTED])"),
+            Self::Totp(v) => f.debug_tuple("Totp").field(v).finish(),
+        }
+    }
+}
+
+impl Serialize for FieldValue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("FieldValue", 2)?;
+        match self {
+            FieldValue::Text(v) => {
+                s.serialize_field("type", "Text")?;
+                s.serialize_field("value", v)?;
+            }
+            FieldValue::Secret(v) => {
+                s.serialize_field("type", "Secret")?;
+                s.serialize_field("value", v.expose_secret())?;
+            }
+            FieldValue::Totp(v) => {
+                s.serialize_field("type", "Totp")?;
+                s.serialize_field("value", v)?;
+            }
+        }
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FieldValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        struct Helper {
+            #[serde(rename = "type")]
+            ty: String,
+            value: String,
+        }
+
+        let h = Helper::deserialize(deserializer)?;
+        match h.ty.as_str() {
+            "Text" => Ok(FieldValue::Text(h.value)),
+            "Secret" => Ok(FieldValue::Secret(SecretString::new(h.value.into()))),
+            "Totp" => Ok(FieldValue::Totp(h.value)),
+            other => Err(D::Error::custom(format!("unknown FieldValue type: {other}"))),
+        }
+    }
+}
+
+// ── CustomField ──────────────────────────────────────────────────────────
 
 /// A user-defined extra field attached to an entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +98,8 @@ pub struct CustomField {
     pub label: String,
     pub value: FieldValue,
 }
+
+// ── Entry ────────────────────────────────────────────────────────────────
 
 /// The full decrypted entry held in memory during an unlocked session.
 ///
@@ -72,6 +137,8 @@ impl Entry {
     }
 }
 
+// ── EntrySummary ─────────────────────────────────────────────────────────
+
 /// Metadata-only view of an entry, safe for list rendering (no secrets).
 #[derive(Debug, Clone)]
 pub struct EntrySummary {
@@ -96,12 +163,11 @@ impl From<&Entry> for EntrySummary {
     }
 }
 
+// ── EntryData (serde mirror, transient, zeroized on drop) ────────────────
+
 /// Serde-compatible mirror of [`Entry`] where the password is a plain
 /// [`String`]. This type is *only* used transiently inside encrypted blobs —
-/// it is serialized to JSON, encrypted, and then immediately zeroized.
-///
-/// Only the `password` field is zeroized on drop; other fields contain no
-/// secrets that aren't already stored as plaintext columns in the database.
+/// it is serialised to JSON, encrypted, and then immediately zeroized.
 #[derive(Serialize, Deserialize)]
 pub struct EntryData {
     pub id: EntryId,
@@ -118,7 +184,10 @@ pub struct EntryData {
 
 impl Drop for EntryData {
     fn drop(&mut self) {
+        // The password is a bare String (not SecretString), so we zeroize it.
         zeroize::Zeroize::zeroize(&mut self.password);
+        // FieldValue::Secret uses SecretString, which zeroizes on its own Drop
+        // — no extra handling needed here.
     }
 }
 
@@ -143,8 +212,6 @@ impl EntryData {
     /// Reconstruct a runtime [`Entry`] with the password wrapped in
     /// [`SecretString`].
     pub fn into_entry(self) -> Entry {
-        // Clone all fields because `self` implements `Drop`, which prevents
-        // moving fields out of the struct.
         Entry {
             id: self.id.clone(),
             title: self.title.clone(),
