@@ -59,7 +59,8 @@ pub async fn run(app: &mut App) -> color_eyre::Result<()> {
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key) => {
-                    if let Some(action) = map_key_to_action(&app.state, key) {
+                    let vim = app.config.vim_keybinds;
+                    if let Some(action) = map_key_to_action(&app.state, key, vim) {
                         app.handle_action(action);
                     }
                 }
@@ -79,17 +80,17 @@ pub async fn run(app: &mut App) -> color_eyre::Result<()> {
 }
 
 /// Translate a [`KeyEvent`] into an [`Action`] based on the current app state.
-fn map_key_to_action(state: &AppState, key: KeyEvent) -> Option<Action> {
+fn map_key_to_action(state: &AppState, key: KeyEvent, vim_enabled: bool) -> Option<Action> {
     match state {
         AppState::FirstRun(_) | AppState::Locked(_) => {
             map_locked_or_firstrun(key)
         }
         AppState::Unlocked(view) => match view {
-            View::EntryList(_) => map_entry_list(key),
+            View::EntryList(_) => map_entry_list(key, vim_enabled),
             View::EntryDetail(_) => map_entry_detail(key),
             View::EntryEdit(_) => map_entry_edit(key),
-            View::Search(_) => map_search(key),
-            View::Settings(_) => map_settings(key),
+            View::Search(_) => map_search(key, vim_enabled),
+            View::Settings(_) => map_settings(key, vim_enabled),
         },
     }
 }
@@ -118,11 +119,15 @@ fn map_locked_or_firstrun(key: KeyEvent) -> Option<Action> {
 }
 
 
-fn map_entry_list(key: KeyEvent) -> Option<Action> {
+fn map_entry_list(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
     match key.code {
         KeyCode::Char('q') => Some(Action::Quit),
-        KeyCode::Char('j') | KeyCode::Down => Some(Action::Down),
-        KeyCode::Char('k') | KeyCode::Up => Some(Action::Up),
+        KeyCode::Down => Some(Action::Down),
+        KeyCode::Up => Some(Action::Up),
+        KeyCode::Char('j') if vim_enabled => Some(Action::Down),
+        KeyCode::Char('k') if vim_enabled => Some(Action::Up),
+        KeyCode::Char('g') if vim_enabled => Some(Action::PageUp),
+        KeyCode::Char('G') if vim_enabled => Some(Action::PageDown),
         KeyCode::Enter => Some(Action::Select),
         KeyCode::Char('n') => Some(Action::NewEntry),
         KeyCode::Char('e') => Some(Action::EditEntry),
@@ -131,8 +136,6 @@ fn map_entry_list(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('/') => Some(Action::StartSearch),
         KeyCode::Char('s') => Some(Action::OpenSettings),
         KeyCode::Char('L') => Some(Action::Lock),
-        KeyCode::Char('g') => Some(Action::PageUp),
-        KeyCode::Char('G') => Some(Action::PageDown),
         KeyCode::PageUp => Some(Action::PageUp),
         KeyCode::PageDown => Some(Action::PageDown),
         _ => None,
@@ -176,25 +179,29 @@ fn map_entry_edit(key: KeyEvent) -> Option<Action> {
 }
 
 
-fn map_search(key: KeyEvent) -> Option<Action> {
+fn map_search(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Backspace => Some(Action::Backspace),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::Down),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::Up),
+        KeyCode::Down => Some(Action::Down),
+        KeyCode::Up => Some(Action::Up),
         KeyCode::Enter => Some(Action::Select),
+        KeyCode::Char('j') if vim_enabled => Some(Action::Down),
+        KeyCode::Char('k') if vim_enabled => Some(Action::Up),
         KeyCode::Char(c) => Some(Action::CharInput(c)),
         _ => None,
     }
 }
 
 
-fn map_settings(key: KeyEvent) -> Option<Action> {
+fn map_settings(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Back),
-        KeyCode::Char('j') | KeyCode::Down => Some(Action::Down),
-        KeyCode::Char('k') | KeyCode::Up => Some(Action::Up),
+        KeyCode::Down => Some(Action::Down),
+        KeyCode::Up => Some(Action::Up),
         KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ToggleSetting),
+        KeyCode::Char('j') if vim_enabled => Some(Action::Down),
+        KeyCode::Char('k') if vim_enabled => Some(Action::Up),
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) && c == 's' {
                 Some(Action::SaveEntry) // reuse SaveEntry for "save settings"
