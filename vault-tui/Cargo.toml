@@ -8,6 +8,8 @@ name = "krp"
 path = "src/main.rs"
 
 [dependencies]
+serde         = { workspace = true }
+serde_json    = { workspace = true }
 vault-core    = { workspace = true }
 vault-service = { workspace = true }
 vault-ext     = { workspace = true }

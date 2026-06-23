@@ -1651,6 +1651,8 @@ dependencies = [
  "dirs",
  "ratatui",
  "secrecy",
+ "serde",
+ "serde_json",
  "tokio",
  "vault-core",
  "vault-crypto",
