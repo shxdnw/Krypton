@@ -8,14 +8,14 @@ use ratatui::{
 use crate::app::EntryListState;
 
 /// Render the entry list as a table with highlight on the selected row.
-pub fn render(f: &mut Frame, state: &EntryListState, area: Rect) {
+pub fn render(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) {
     state.table_rect.set(ratatui::layout::Rect {
         y: area.y + 2, // header + border
         height: area.height.saturating_sub(3), // header + hint
         ..area
     });
     let header = Row::new(["Title", "Username", "Updated"])
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .style(Style::default().fg(accent).add_modifier(Modifier::BOLD));
 
     let rows: Vec<Row> = state
         .entries
@@ -28,7 +28,7 @@ pub fn render(f: &mut Frame, state: &EntryListState, area: Rect) {
         .collect();
 
     let highlight = Style::default()
-        .fg(Color::Yellow)
+        .fg(accent)
         .add_modifier(Modifier::REVERSED);
 
     let mut table_state = TableState::default();
@@ -53,7 +53,7 @@ pub fn render(f: &mut Frame, state: &EntryListState, area: Rect) {
     f.render_stateful_widget(table, area, &mut table_state);
 
     let hint = Paragraph::new(
-        "[Enter] open  [n] new  [e] edit  [d] delete  [y] copy pw  [/] search  [L] lock  [q] quit",
+        "[Enter] open  [n] new  [e] edit  [d] delete  [y] copy pw  [/] search  [s] settings  [L] lock  [q] quit",
     )
     .style(Style::default().fg(Color::Gray))
     .alignment(Alignment::Center);

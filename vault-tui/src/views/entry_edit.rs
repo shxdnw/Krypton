@@ -8,7 +8,7 @@ use secrecy::ExposeSecret;
 
 use crate::app::EntryEditState;
 
-pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect) {
+pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect, accent: Color) {
     let title_text = if state.id.is_some() {
         "Edit Entry"
     } else {
@@ -45,7 +45,7 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect) {
 
     for (idx, (field_idx, label, value)) in fields.iter().enumerate() {
         let border_color = if *field_idx == state.active_field as u16 {
-            Color::Yellow
+            accent
         } else {
             Color::DarkGray
         };

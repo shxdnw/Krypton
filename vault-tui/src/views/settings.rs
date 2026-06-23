@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::SettingsState;
 
-pub fn render(f: &mut Frame, state: &SettingsState, area: Rect) {
+pub fn render(f: &mut Frame, state: &SettingsState, area: Rect, accent: Color) {
     let block = Block::default()
         .title("Settings")
         .borders(Borders::ALL);
@@ -22,7 +22,7 @@ pub fn render(f: &mut Frame, state: &SettingsState, area: Rect) {
             if i == state.selected {
                 ListItem::new(line).style(
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(accent)
                         .add_modifier(Modifier::REVERSED),
                 )
             } else {
