@@ -22,6 +22,22 @@ impl SqliteStore {
             cipher,
         })
     }
+
+    /// Read a single key from `vault_meta` without needing a cipher.
+    ///
+    /// This is used during unlock to fetch the salt *before* the encryption
+    /// key has been derived.
+    pub fn read_meta_raw(path: &Path, key: &str) -> Result<Vec<u8>> {
+        let conn = Connection::open(path).map_err(|e| {
+            VaultError::Storage(format!("cannot open database: {e}"))
+        })?;
+        conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .map_err(|_| VaultError::NotFound(format!("vault_meta key: {key}")))
+    }
 }
 
 impl Store for SqliteStore {
@@ -276,5 +292,29 @@ impl Store for SqliteStore {
             // FTS5 returns an error for empty/invalid queries; return empty results.
             Err(_) => Ok(Vec::new()),
         }
+    }
+
+    fn set_vault_meta(&self, key: &str, value: &[u8]) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            VaultError::Storage(format!("lock poisoned: {e}"))
+        })?;
+        conn.execute(
+            "INSERT OR REPLACE INTO vault_meta (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )
+        .map_err(|e| VaultError::Storage(format!("set_vault_meta: {e}")))?;
+        Ok(())
+    }
+
+    fn get_vault_meta(&self, key: &str) -> Result<Vec<u8>> {
+        let conn = self.conn.lock().map_err(|e| {
+            VaultError::Storage(format!("lock poisoned: {e}"))
+        })?;
+        conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .map_err(|_| VaultError::NotFound(format!("vault_meta key: {key}")))
     }
 }

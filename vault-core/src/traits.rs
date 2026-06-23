@@ -22,6 +22,12 @@ pub trait Store: Send + Sync + 'static {
 
     /// Full-text search across title, username, url, and tags.
     fn search(&self, query: &str) -> Result<Vec<EntrySummary>>;
+
+    /// Store a raw blob in the vault metadata table.
+    fn set_vault_meta(&self, key: &str, value: &[u8]) -> Result<()>;
+
+    /// Retrieve a raw blob from the vault metadata table.
+    fn get_vault_meta(&self, key: &str) -> Result<Vec<u8>>;
 }
 
 /// Symmetric authenticated encryption.
