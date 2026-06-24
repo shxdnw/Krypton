@@ -23,6 +23,30 @@ impl SqliteStore {
         })
     }
 
+    /// Run a closure inside a SQLite transaction, keeping the connection
+    /// locked for the duration. Rolls back on error.
+    pub fn transaction<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&Connection) -> Result<T>,
+    {
+        let conn = self.conn.lock().map_err(|e| {
+            VaultError::Storage(format!("lock poisoned: {e}"))
+        })?;
+        conn.execute("BEGIN", [])
+            .map_err(|e| VaultError::Storage(format!("begin: {e}")))?;
+        match f(&conn) {
+            Ok(v) => {
+                conn.execute("COMMIT", [])
+                    .map_err(|e| VaultError::Storage(format!("commit: {e}")))?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
     /// Read a single key from `vault_meta` without needing a cipher.
     ///
     /// This is used during unlock to fetch the salt *before* the encryption

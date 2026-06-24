@@ -71,10 +71,64 @@ impl VaultService {
         let verify_blob = cipher.encrypt(VERIFY_PLAINTEXT)?;
 
         let store = Arc::new(SqliteStore::open(&self.store_path, cipher)?);
-        store.init()?;
 
-        store.set_vault_meta(SALT_KEY, &salt)?;
-        store.set_vault_meta(VERIFY_KEY, &verify_blob)?;
+        // Run initialisation + meta writes in a transaction so a crash
+        // doesn't leave the vault in an unrecoverable partial state.
+        store.transaction(|conn| {
+            // Create schema.
+            conn.execute_batch("PRAGMA journal_mode=WAL;")
+                .map_err(|e| VaultError::Storage(format!("pragma: {e}")))?;
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS vault_meta (
+                    key   TEXT PRIMARY KEY,
+                    value BLOB NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS entries (
+                    rowid          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id             TEXT UNIQUE NOT NULL,
+                    title          TEXT NOT NULL DEFAULT '',
+                    username       TEXT,
+                    url            TEXT,
+                    tags           TEXT NOT NULL DEFAULT '[]',
+                    encrypted_data BLOB NOT NULL,
+                    created_at     INTEGER NOT NULL,
+                    updated_at     INTEGER NOT NULL
+                );
+                CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+                    title, username, url, tags,
+                    content='entries', content_rowid='rowid'
+                );
+                CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
+                    INSERT INTO entries_fts(rowid, title, username, url, tags)
+                    VALUES (new.rowid, new.title, new.username, new.url, new.tags);
+                END;
+                CREATE TRIGGER IF NOT EXISTS entries_ad AFTER DELETE ON entries BEGIN
+                    INSERT INTO entries_fts(entries_fts, rowid, title, username, url, tags)
+                    VALUES ('delete', old.rowid, old.title, old.username, old.url, old.tags);
+                END;
+                CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
+                    INSERT INTO entries_fts(entries_fts, rowid, title, username, url, tags)
+                    VALUES ('delete', old.rowid, old.title, old.username, old.url, old.tags);
+                    INSERT INTO entries_fts(rowid, title, username, url, tags)
+                    VALUES (new.rowid, new.title, new.username, new.url, new.tags);
+                END;",
+            )
+            .map_err(|e| VaultError::Storage(format!("init: {e}")))?;
+
+            // Write salt and verify blob.
+            conn.execute(
+                "INSERT OR REPLACE INTO vault_meta (key, value) VALUES (?1, ?2)",
+                rusqlite::params![SALT_KEY, salt.as_slice()],
+            )
+            .map_err(|e| VaultError::Storage(format!("write salt: {e}")))?;
+            conn.execute(
+                "INSERT OR REPLACE INTO vault_meta (key, value) VALUES (?1, ?2)",
+                rusqlite::params![VERIFY_KEY, verify_blob.as_slice()],
+            )
+            .map_err(|e| VaultError::Storage(format!("write verify: {e}")))?;
+
+            Ok(())
+        })?;
 
         let mut session = self.session.write().map_err(|e| {
             VaultError::Storage(format!("session lock poisoned: {e}"))

@@ -8,3 +8,4 @@ vault-core   = { workspace = true }
 vault-crypto = { workspace = true }
 vault-store  = { workspace = true }
 vault-ext    = { workspace = true }
+rusqlite     = { workspace = true }
