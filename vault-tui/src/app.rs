@@ -236,7 +236,7 @@ impl SettingsState {
     /// Get the display label and value string for row `i`.
     pub fn row(&self, i: usize) -> (String, String) {
         match i {
-            0 => ("Encrypt metadata".into(), fmt_bool(self.config.encrypt_metadata)),
+            0 => ("Hide metadata in list".into(), fmt_bool(self.config.hide_metadata)),
             1 => ("Clipboard timeout (s)".into(), {
                 if self.editing_number && self.selected == 1 {
                     format!("{}_", self.number_buffer)
@@ -261,7 +261,7 @@ impl SettingsState {
     /// Toggle the boolean at row `i`, if it's a boolean field.
     pub fn toggle(&mut self, i: usize) {
         match i {
-            0 => self.config.encrypt_metadata = !self.config.encrypt_metadata,
+            0 => self.config.hide_metadata = !self.config.hide_metadata,
             2 => self.config.confirm_before_delete = !self.config.confirm_before_delete,
             4 => self.config.password_uppercase = !self.config.password_uppercase,
             5 => self.config.password_lowercase = !self.config.password_lowercase,
@@ -1264,8 +1264,8 @@ impl App {
                     self.show_toast(format!("Save failed: {e}"), ToastKind::Error);
                 } else {
                     self.config = state.config.clone();
-                    self.service.encrypt_metadata.store(
-                        self.config.encrypt_metadata,
+                    self.service.hide_metadata.store(
+                        self.config.hide_metadata,
                         std::sync::atomic::Ordering::Relaxed,
                     );
                     self.show_toast("Settings saved", ToastKind::Success);

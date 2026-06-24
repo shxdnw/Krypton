@@ -27,9 +27,9 @@ pub struct VaultService {
     store_path: PathBuf,
     deriver: Arc<dyn KeyDeriver>,
     session: RwLock<Option<UnlockedSession>>,
-    /// When true, title/username/url are stored as "[encrypted]" in
-    /// plaintext columns (the real values live inside the encrypted blob).
-    pub encrypt_metadata: AtomicBool,
+    /// When true, title/username/url are shown as "[hidden]" in the entry
+    /// list (the real values live inside the encrypted blob).
+    pub hide_metadata: AtomicBool,
     /// Extension registry — generators, hooks, importers.
     pub extensions: Arc<vault_ext::Registry>,
 }
@@ -45,7 +45,7 @@ impl VaultService {
             deriver,
             extensions,
             session: RwLock::new(None),
-            encrypt_metadata: AtomicBool::new(false),
+            hide_metadata: AtomicBool::new(false),
         }
     }
 
@@ -204,9 +204,9 @@ impl VaultService {
 
     pub fn list_entries(&self) -> Result<Vec<EntrySummary>> {
         let mut entries = self.require_session()?.list_entries()?;
-        if self.encrypt_metadata.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.hide_metadata.load(std::sync::atomic::Ordering::Relaxed) {
             for e in &mut entries {
-                e.title = "[encrypted]".into();
+                e.title = "[hidden]".into();
                 e.username = None;
                 e.url = None;
             }
