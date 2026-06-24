@@ -50,23 +50,24 @@ impl KeyDeriver for Argon2IdDeriver {
 ///
 /// Ciphertext format: `[12-byte nonce][encrypted data + 16-byte tag]`
 ///
-/// A copy of the key is held in a [`Zeroizing`] wrapper so it is scrubbed
-/// from memory when the cipher is dropped (e.g. on vault lock).
+/// The key is stored in a [`Zeroizing`] wrapper and the `ChaCha20Poly1305`
+/// object is constructed on-the-fly for each encrypt/decrypt call. This
+/// guarantees the key material is scrubbed from memory on drop — the
+/// `chacha20poly1305` crate does not zeroize its internal expanded key state.
 pub struct ChaCha20Cipher {
-    aead: ChaCha20Poly1305,
-    /// Retained copy of the key for explicit zeroization on drop.
-    /// The `ChaCha20Poly1305` object internally copies the key, but its
-    /// `Drop` does not zeroize — we hold this so we can guarantee it.
-    _key: zeroize::Zeroizing<[u8; 32]>,
+    key: zeroize::Zeroizing<[u8; 32]>,
 }
 
 impl ChaCha20Cipher {
     pub fn new(key: &[u8; 32]) -> Self {
         Self {
-            aead: ChaCha20Poly1305::new_from_slice(key)
-                .expect("ChaCha20Poly1305 key is exactly 32 bytes"),
-            _key: zeroize::Zeroizing::new(*key),
+            key: zeroize::Zeroizing::new(*key),
         }
+    }
+
+    fn aead(&self) -> ChaCha20Poly1305 {
+        ChaCha20Poly1305::new_from_slice(self.key.as_slice())
+            .expect("ChaCha20Poly1305 key is exactly 32 bytes")
     }
 }
 
@@ -77,11 +78,10 @@ impl Cipher for ChaCha20Cipher {
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = self
-            .aead
+            .aead()
             .encrypt(nonce, plaintext)
             .map_err(|e| VaultError::Crypto(format!("encryption failed: {e}")))?;
 
-        // Prepend nonce to ciphertext.
         let mut out = Vec::with_capacity(12 + ciphertext.len());
         out.extend_from_slice(&nonce_bytes);
         out.extend_from_slice(&ciphertext);
@@ -95,7 +95,7 @@ impl Cipher for ChaCha20Cipher {
         let (nonce_bytes, encrypted) = ciphertext.split_at(12);
         let nonce = Nonce::from_slice(nonce_bytes);
 
-        self.aead
+        self.aead()
             .decrypt(nonce, encrypted)
             .map_err(|_| VaultError::Crypto("decryption failed".into()))
     }
