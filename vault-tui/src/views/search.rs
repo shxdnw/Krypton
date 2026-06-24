@@ -36,30 +36,38 @@ pub fn render(f: &mut Frame, state: &SearchState, area: Rect, accent: Color) {
         );
     f.render_widget(search_bar, chunks[0]);
 
-    // Results list.
-    let items: Vec<ListItem> = state
-        .results
-        .iter()
-        .map(|e| {
-            let title = &e.title;
-            let username = e.username.as_deref().unwrap_or("");
-            ListItem::new(format!("{title}  ({username})"))
-        })
-        .collect();
+    // Results list or empty-state message.
+    if !state.query.is_empty() && state.results.is_empty() {
+        let msg = Paragraph::new("No matching entries.")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title("Results"));
+        f.render_widget(msg, chunks[1]);
+    } else {
+        let items: Vec<ListItem> = state
+            .results
+            .iter()
+            .map(|e| {
+                let title = &e.title;
+                let username = e.username.as_deref().unwrap_or("");
+                ListItem::new(format!("{title}  ({username})"))
+            })
+            .collect();
 
-    let highlight = Style::default()
-        .fg(accent)
-        .add_modifier(Modifier::REVERSED);
+        let highlight = Style::default()
+            .fg(accent)
+            .add_modifier(Modifier::REVERSED);
 
-    let list = List::new(items)
-        .highlight_style(highlight)
-        .highlight_symbol("> ")
-        .block(Block::default().borders(Borders::ALL).title("Results"));
+        let list = List::new(items)
+            .highlight_style(highlight)
+            .highlight_symbol("> ")
+            .block(Block::default().borders(Borders::ALL).title("Results"));
 
-    let mut list_state = ratatui::widgets::ListState::default();
-    list_state.select(Some(state.selected));
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(Some(state.selected));
 
-    f.render_stateful_widget(list, chunks[1], &mut list_state);
+        f.render_stateful_widget(list, chunks[1], &mut list_state);
+    }
 
     // Bottom bar.
     let hint = Paragraph::new("[Esc] back  [j/k] navigate  [Enter] open")

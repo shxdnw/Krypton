@@ -74,48 +74,55 @@ pub fn render(
 
 /// Render the entries table on the right side.
 fn render_table(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) {
-    let header = Row::new(["Title", "Username", "Updated"])
-        .style(Style::default().fg(accent).add_modifier(Modifier::BOLD));
+    let block = Block::default()
+        .title("Entries")
+        .borders(Borders::ALL);
 
-    let rows: Vec<Row> = state
-        .entries
-        .iter()
-        .map(|e| {
-            let username = e.username.clone().unwrap_or_default();
-            let updated = relative_time(e.updated_at);
-            // Truncate long values with ellipsis for narrow columns.
-            Row::new(vec![
-                truncate(&e.title, 24),
-                truncate(&username, 18),
-                updated,
-            ])
-        })
-        .collect();
+    if state.entries.is_empty() {
+        let msg = Paragraph::new("No entries yet. Press [n] to create one.")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center)
+            .block(block);
+        f.render_widget(msg, area);
+    } else {
+        let header = Row::new(["Title", "Username", "Updated"])
+            .style(Style::default().fg(accent).add_modifier(Modifier::BOLD));
 
-    let highlight = Style::default()
-        .fg(accent)
-        .add_modifier(Modifier::REVERSED);
+        let rows: Vec<Row> = state
+            .entries
+            .iter()
+            .map(|e| {
+                let username = e.username.clone().unwrap_or_default();
+                let updated = relative_time(e.updated_at);
+                Row::new(vec![
+                    truncate(&e.title, 24),
+                    truncate(&username, 18),
+                    updated,
+                ])
+            })
+            .collect();
 
-    let mut table_state = TableState::default();
-    table_state.select(Some(state.selected));
+        let highlight = Style::default()
+            .fg(accent)
+            .add_modifier(Modifier::REVERSED);
 
-    let widths = [
-        Constraint::Percentage(40),
-        Constraint::Percentage(30),
-        Constraint::Percentage(30),
-    ];
+        let mut table_state = TableState::default();
+        table_state.select(Some(state.selected));
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .title("Entries")
-                .borders(Borders::ALL),
-        )
-        .row_highlight_style(highlight)
-        .highlight_symbol("> ");
+        let widths = [
+            Constraint::Percentage(40),
+            Constraint::Percentage(30),
+            Constraint::Percentage(30),
+        ];
 
-    f.render_stateful_widget(table, area, &mut table_state);
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(block)
+            .row_highlight_style(highlight)
+            .highlight_symbol("> ");
+
+        f.render_stateful_widget(table, area, &mut table_state);
+    }
 }
 
 /// Render the preview sidebar on the left.
