@@ -146,6 +146,11 @@ pub struct EntryEditState {
     pub notes: String,
     pub active_field: usize,
     pub dirty: bool,
+    /// The original password when editing an existing entry.
+    /// If the user leaves the password field empty, we keep this.
+    pub existing_password: SecretString,
+    /// The original created_at timestamp for existing entries.
+    pub initial_created_at: i64,
 }
 
 impl Default for EntryEditState {
@@ -159,6 +164,8 @@ impl Default for EntryEditState {
             notes: String::new(),
             active_field: 0,
             dirty: false,
+            existing_password: SecretString::new("".into()),
+            initial_created_at: 0,
         }
     }
 }
@@ -619,6 +626,8 @@ impl App {
                 {
                     match self.service.get_entry(&summary.id) {
                         Ok(entry) => {
+                            let created = entry.created_at;
+                            let existing_pw = entry.password.clone();
                             self.state =
                                 AppState::Unlocked(View::EntryEdit(
                                     EntryEditState {
@@ -641,6 +650,8 @@ impl App {
                                             .unwrap_or_default(),
                                         active_field: 0,
                                         dirty: false,
+                                        existing_password: existing_pw,
+                                        initial_created_at: created,
                                     },
                                 ));
                         }
@@ -812,6 +823,8 @@ impl App {
                             .unwrap_or_default(),
                         active_field: 0,
                         dirty: false,
+                        existing_password: state.entry.password.clone(),
+                        initial_created_at: state.entry.created_at,
                     }
                 };
                 self.state = AppState::Unlocked(View::EntryEdit(edit_state));
@@ -961,6 +974,21 @@ impl App {
                     return;
                 }
                 let now = chrono::Utc::now().timestamp();
+                let is_new = state.id.is_none();
+                let pw = std::mem::replace(
+                    &mut state.password,
+                    SecretString::new("".into()),
+                );
+                let existing = std::mem::replace(
+                    &mut state.existing_password,
+                    SecretString::new("".into()),
+                );
+                // If the user didn't type a new password, keep the existing one.
+                let password = if pw.expose_secret().is_empty() && !is_new {
+                    existing
+                } else {
+                    pw
+                };
                 let entry = Entry {
                     id: state
                         .id
@@ -972,10 +1000,7 @@ impl App {
                     } else {
                         Some(std::mem::take(&mut state.username))
                     },
-                    password: std::mem::replace(
-                        &mut state.password,
-                        SecretString::new("".into()),
-                    ),
+                    password,
                     url: if state.url.is_empty() {
                         None
                     } else {
@@ -988,10 +1013,10 @@ impl App {
                     },
                     tags: Vec::new(),
                     custom_fields: Vec::new(),
-                    created_at: if state.id.is_some() {
-                        0
-                    } else {
+                    created_at: if is_new {
                         now
+                    } else {
+                        state.initial_created_at
                     },
                     updated_at: now,
                 };
