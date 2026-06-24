@@ -123,21 +123,25 @@ impl KryptonConfig {
             None => return Self::default(),
         };
         match std::fs::read_to_string(&path) {
-            Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+            Ok(json) => serde_json::from_str(&json).unwrap_or_else(|e| {
+                eprintln!("[krypton] config parse failed ({e}), using defaults");
+                Self::default()
+            }),
             Err(_) => Self::default(),
         }
     }
 
-    /// Persist the current config to disk, creating parent directories
-    /// if needed.
-    #[allow(dead_code)] // used by settings UI (Step 5)
+    /// Persist the current config to disk atomically: write to a temp file
+    /// then rename over the real path. Creates parent directories if needed.
     pub fn save(&self) -> Result<(), String> {
         let path = Self::path().ok_or("no config directory")?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
         }
         let json = serde_json::to_string_pretty(self).map_err(|e| format!("serialize: {e}"))?;
-        std::fs::write(&path, json).map_err(|e| format!("write: {e}"))?;
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, &json).map_err(|e| format!("write: {e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
         Ok(())
     }
 }
