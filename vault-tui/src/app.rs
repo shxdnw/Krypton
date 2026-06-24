@@ -402,6 +402,8 @@ impl App {
             Action::Tick => self.tick(),
             Action::Quit => {
                 self.clear_clipboard_now();
+                self.service.lock();
+                self.confirm_action = None;
                 self.should_quit = true;
             }
             _ => self.handle_action_inner(action),
