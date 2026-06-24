@@ -7,10 +7,11 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KryptonConfig {
     // ── Security ──────────────────────────────────────────────────────
-    /// When true, title/username/url are encrypted inside the entry blob
-    /// instead of stored as plaintext columns. Disables FTS5 search.
-    #[serde(default)]
-    pub encrypt_metadata: bool,
+    /// When true, title/username/url are hidden from plaintext columns in the
+    /// entry list view (shown as "[hidden]"). The real values are still stored
+    /// inside the encrypted blob. Disables FTS5 search.
+    #[serde(default, alias = "encrypt_metadata")]
+    pub hide_metadata: bool,
 
     /// Seconds before the clipboard is automatically cleared after a copy.
     #[serde(default = "default_clipboard_timeout")]
@@ -70,7 +71,7 @@ pub struct KryptonConfig {
 impl Default for KryptonConfig {
     fn default() -> Self {
         Self {
-            encrypt_metadata: false,
+            hide_metadata: false,
             clipboard_timeout_secs: 30,
             confirm_before_delete: false,
             password_length: 20,
