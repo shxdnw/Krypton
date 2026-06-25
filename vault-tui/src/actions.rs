@@ -32,4 +32,5 @@ pub enum Action {
     OpenSettings,
     ToggleSetting,
     GeneratePassword,
+    Help,
 }

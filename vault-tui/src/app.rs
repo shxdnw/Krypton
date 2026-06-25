@@ -311,13 +311,13 @@ fn fmt_bool(b: bool) -> String {
 
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Settings variant wired in Step 5
 pub enum View {
     EntryList(EntryListState),
     EntryDetail(EntryDetailState),
     EntryEdit(EntryEditState),
     Search(SearchState),
     Settings(SettingsState),
+    Help(Box<View>),
 }
 
 
@@ -414,6 +414,7 @@ impl App {
                 View::EntryEdit(_) => self.handle_entry_edit(action),
                 View::Search(_) => self.handle_search(action),
                 View::Settings(_) => self.handle_settings(action),
+                View::Help(_) => self.handle_help(action),
             },
         }
     }
@@ -773,6 +774,7 @@ impl App {
                 self.state =
                     AppState::Locked(LockedState::default());
             }
+            Action::Help => self.open_help(),
             _ => {}
         }
     }
@@ -845,6 +847,7 @@ impl App {
                     );
                 }
             }
+            Action::Help => self.open_help(),
             Action::CopyUsername => {
                 let username = {
                     let AppState::Unlocked(View::EntryDetail(ref state)) =
@@ -931,6 +934,7 @@ impl App {
                     _ => {}
                 }
             }
+            Action::Help => self.open_help(),
             Action::GeneratePassword => {
                 if state.active_field == 2 {
                     let gen_config = vault_ext::GeneratorConfig {
@@ -1098,6 +1102,7 @@ impl App {
                     }
                 }
             }
+            Action::Help => self.open_help(),
             Action::Select => {
                 let summary_opt = {
                     let AppState::Unlocked(View::Search(ref state)) =
@@ -1123,6 +1128,27 @@ impl App {
                             ToastKind::Error,
                         ),
                     }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ── Help ────────────────────────────────────────────────────────
+
+    fn open_help(&mut self) {
+        let prev = match &self.state {
+            AppState::Unlocked(view) => Box::new(view.clone()),
+            _ => Box::new(View::EntryList(EntryListState::default())),
+        };
+        self.state = AppState::Unlocked(View::Help(prev));
+    }
+
+    fn handle_help(&mut self, action: Action) {
+        match action {
+            Action::Back => {
+                if let AppState::Unlocked(View::Help(prev)) = &mut self.state {
+                    self.state = AppState::Unlocked(*prev.clone());
                 }
             }
             _ => {}
@@ -1236,6 +1262,7 @@ impl App {
                     state.number_buffer.pop();
                 }
             }
+            Action::Help => self.open_help(),
             Action::SaveEntry => {
                 if state.editing_number {
                     state.commit_number();
