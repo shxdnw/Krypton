@@ -113,6 +113,7 @@ fn map_locked_or_firstrun(key: KeyEvent) -> Option<Action> {
                     KeyCode::Char('h') | KeyCode::Char('v') => {
                         Some(Action::ToggleVisibility)
                     }
+                    KeyCode::Char('r') => Some(Action::StartReset),
                     _ => None,
                 }
             } else {
@@ -140,11 +141,25 @@ fn map_entry_list(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Char('y') => Some(Action::CopyPassword),
         KeyCode::Char('/') => Some(Action::StartSearch),
         KeyCode::Char('s') => Some(Action::OpenSettings),
+        KeyCode::Char('u') => Some(Action::CopyUsername),
+        KeyCode::Char('c') => Some(Action::CopyUrl),
         KeyCode::Char('L') => Some(Action::Lock),
+        KeyCode::Char('?') => Some(Action::Help),
         KeyCode::PageUp => Some(Action::PageUp),
         KeyCode::PageDown => Some(Action::PageDown),
-        KeyCode::Char('?') => Some(Action::Help),
-        _ => None,
+        _ => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('e') => Some(Action::Export),
+                    KeyCode::Char('i') => Some(Action::Import),
+                    KeyCode::Char('d') => Some(Action::DuplicateEntry),
+                    KeyCode::Char('l') => Some(Action::Lock),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -156,9 +171,21 @@ fn map_entry_detail(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('e') => Some(Action::EditEntry),
         KeyCode::Char('y') => Some(Action::CopyPassword),
         KeyCode::Char('u') => Some(Action::CopyUsername),
+        KeyCode::Char('c') => Some(Action::CopyUrl),
+        KeyCode::Char('d') => Some(Action::DeleteEntry),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
         KeyCode::Char('?') => Some(Action::Help),
-        _ => None,
+        _ => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('d') => Some(Action::DuplicateEntry),
+                    KeyCode::Char('l') => Some(Action::Lock),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -180,6 +207,7 @@ fn map_entry_edit(key: KeyEvent) -> Option<Action> {
                 match c {
                     's' => Some(Action::SaveEntry),
                     'g' => Some(Action::GeneratePassword),
+                    'l' => Some(Action::Lock),
                     _ => Some(Action::CharInput(c)),
                 }
             } else {
@@ -200,9 +228,23 @@ fn map_search(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Up => Some(Action::Up),
         KeyCode::Enter => Some(Action::Select),
         KeyCode::Char('?') => Some(Action::Help),
+        KeyCode::Char('y') => Some(Action::CopyPassword),
+        KeyCode::Char('u') => Some(Action::CopyUsername),
+        KeyCode::Char('e') => Some(Action::EditEntry),
+        KeyCode::Char('d') => Some(Action::DeleteEntry),
         KeyCode::Char('j') if vim_enabled => Some(Action::Down),
         KeyCode::Char('k') if vim_enabled => Some(Action::Up),
-        KeyCode::Char(c) => Some(Action::CharInput(c)),
+        KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match c {
+                    'd' => Some(Action::DuplicateEntry),
+                    'l' => Some(Action::Lock),
+                    _ => Some(Action::CharInput(c)),
+                }
+            } else {
+                Some(Action::CharInput(c))
+            }
+        }
         _ => None,
     }
 }
@@ -219,8 +261,12 @@ fn map_settings(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Char('j') if vim_enabled => Some(Action::Down),
         KeyCode::Char('k') if vim_enabled => Some(Action::Up),
         KeyCode::Char(c) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) && c == 's' {
-                Some(Action::SaveEntry) // reuse SaveEntry for "save settings"
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match c {
+                    's' => Some(Action::SaveEntry),
+                    'l' => Some(Action::Lock),
+                    _ => Some(Action::CharInput(c)),
+                }
             } else {
                 Some(Action::CharInput(c))
             }

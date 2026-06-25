@@ -45,6 +45,13 @@ pub struct LockedState {
     pub error: Option<String>,
     #[allow(dead_code)]
     pub loading: bool,
+    pub reset_step: Option<ResetStep>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ResetStep {
+    TypingConfirm { buffer: String },
+    Waiting { seconds: u64 },
 }
 
 impl Default for LockedState {
@@ -54,6 +61,7 @@ impl Default for LockedState {
             hidden: true,
             error: None,
             loading: false,
+            reset_step: None,
         }
     }
 }
@@ -500,7 +508,49 @@ impl App {
             return;
         };
 
+        // Handle vault reset flow.
+        if state.reset_step.is_some() {
+            match action {
+                Action::Back => {
+                    state.reset_step = None;
+                    return;
+                }
+                Action::Tick => {
+                    if let Some(ResetStep::Waiting { seconds }) = &mut state.reset_step {
+                        if *seconds > 0 {
+                            *seconds -= 1;
+                        }
+                        if *seconds == 0 {
+                            // Delete the vault.
+                            let _ = std::fs::remove_file(&self.service.store_path);
+                            self.state = AppState::FirstRun(FirstRunState::default());
+                        }
+                    }
+                    return;
+                }
+                Action::CharInput(c) => {
+                    if let Some(ResetStep::TypingConfirm { buffer }) = &mut state.reset_step {
+                        buffer.push(c);
+                        if buffer == "I accept the risks" {
+                            state.reset_step = Some(ResetStep::Waiting { seconds: 10 });
+                        }
+                    }
+                    return;
+                }
+                Action::Backspace => {
+                    if let Some(ResetStep::TypingConfirm { buffer }) = &mut state.reset_step {
+                        buffer.pop();
+                    }
+                    return;
+                }
+                _ => return,
+            }
+        }
+
         match action {
+            Action::StartReset => {
+                state.reset_step = Some(ResetStep::TypingConfirm { buffer: String::new() });
+            }
             Action::CharInput(c) => {
                 let mut current = state.input.expose_secret().clone();
                 current.push(c);
@@ -781,6 +831,33 @@ impl App {
                     AppState::Locked(LockedState::default());
             }
             Action::Help => self.open_help(),
+            Action::Export => self.handle_export(),
+            Action::Import => self.handle_import(),
+            Action::CopyUrl => {
+                if let Some(summary) = state.entries.get(state.selected) {
+                    if let Ok(entry) = self.service.get_entry(&summary.id) {
+                        if let Some(ref u) = entry.url {
+                            if self.copy_to_clipboard(u) {
+                                self.show_toast("URL copied", ToastKind::Success);
+                            }
+                        }
+                    }
+                }
+            }
+            Action::DuplicateEntry => {
+                if let Some(summary) = state.entries.get(state.selected) {
+                    if let Ok(mut entry) = self.service.get_entry(&summary.id) {
+                        entry.id = vault_core::EntryId::new();
+                        entry.title = format!("{} (copy)", entry.title);
+                        entry.created_at = chrono::Utc::now().timestamp();
+                        entry.updated_at = entry.created_at;
+                        match self.service.create_entry(&entry) {
+                            Ok(()) => { self.show_toast("Entry duplicated", ToastKind::Success); self.reload_entries(); }
+                            Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -855,6 +932,57 @@ impl App {
                 }
             }
             Action::Help => self.open_help(),
+            Action::CopyUrl => {
+                let url = {
+                    let AppState::Unlocked(View::EntryDetail(ref state)) = &self.state else { return; };
+                    state.entry.url.clone()
+                };
+                if let Some(ref u) = url {
+                    if self.copy_to_clipboard(u) {
+                        self.show_toast("URL copied", ToastKind::Success);
+                    }
+                }
+            }
+            Action::DeleteEntry => {
+                let id = {
+                    let AppState::Unlocked(View::EntryDetail(ref state)) = &self.state else { return; };
+                    state.entry.id.clone()
+                };
+                if self.config.confirm_before_delete {
+                    match self.confirm_action.take() {
+                        Some(ConfirmAction::DeleteEntry(ref expected)) if expected == &id => {
+                            match self.service.delete_entry(&id) {
+                                Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
+                                Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                            }
+                        }
+                        _ => {
+                            self.confirm_action = Some(ConfirmAction::DeleteEntry(id));
+                            self.show_toast("Press d again to confirm delete, Esc to cancel", ToastKind::Info);
+                        }
+                    }
+                } else {
+                    match self.service.delete_entry(&id) {
+                        Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
+                        Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                    }
+                }
+            }
+            Action::DuplicateEntry => {
+                let new_entry = {
+                    let AppState::Unlocked(View::EntryDetail(ref state)) = &self.state else { return; };
+                    let mut e = state.entry.clone();
+                    e.id = vault_core::EntryId::new();
+                    e.title = format!("{} (copy)", state.entry.title);
+                    e.created_at = chrono::Utc::now().timestamp();
+                    e.updated_at = e.created_at;
+                    e
+                };
+                match self.service.create_entry(&new_entry) {
+                    Ok(()) => { self.show_toast("Entry duplicated", ToastKind::Success); self.pop_to_list(); }
+                    Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                }
+            }
             Action::CopyUsername => {
                 let username = {
                     let AppState::Unlocked(View::EntryDetail(ref state)) =
@@ -1111,6 +1239,100 @@ impl App {
                 }
             }
             Action::Help => self.open_help(),
+            Action::CopyPassword => {
+                let pw = {
+                    if let AppState::Unlocked(View::Search(ref s)) = self.state {
+                        s.results.get(s.selected).and_then(|summary| {
+                            self.service.get_entry(&summary.id).ok().map(|e| {
+                                e.password.expose_secret().clone()
+                            })
+                        })
+                    } else { None }
+                };
+                if let Some(pw) = pw {
+                    if self.copy_to_clipboard(&pw) {
+                        let secs = self.config.clipboard_timeout_secs;
+                        self.show_toast(format!("Password copied — clears in {secs}s"), ToastKind::Success);
+                    } else {
+                        self.show_toast("Clipboard unavailable", ToastKind::Error);
+                    }
+                }
+            }
+            Action::CopyUsername => {
+                if let AppState::Unlocked(View::Search(ref s)) = self.state {
+                    if let Some(summary) = s.results.get(s.selected) {
+                        if let Ok(entry) = self.service.get_entry(&summary.id) {
+                            if let Some(ref u) = entry.username {
+                                if self.copy_to_clipboard(u) { self.show_toast("Username copied", ToastKind::Success); }
+                            }
+                        }
+                    }
+                }
+            }
+            Action::EditEntry => {
+                let summary_opt = if let AppState::Unlocked(View::Search(ref s)) = self.state {
+                    s.results.get(s.selected).cloned()
+                } else { None };
+                if let Some(summary) = summary_opt {
+                    if let Ok(entry) = self.service.get_entry(&summary.id) {
+                        self.state = AppState::Unlocked(View::EntryEdit(EntryEditState {
+                            id: Some(entry.id.clone()),
+                            title: entry.title.clone(),
+                            username: entry.username.clone().unwrap_or_default(),
+                            password: SecretString::new("".into()),
+                            url: entry.url.clone().unwrap_or_default(),
+                            notes: entry.notes.clone().unwrap_or_default(),
+                            active_field: 0,
+                            dirty: false,
+                            existing_password: entry.password.clone(),
+                            initial_created_at: entry.created_at,
+                        }));
+                    }
+                }
+            }
+            Action::DeleteEntry => {
+                let summary_opt = if let AppState::Unlocked(View::Search(ref s)) = self.state {
+                    s.results.get(s.selected).cloned()
+                } else { None };
+                if let Some(summary) = summary_opt {
+                    if self.config.confirm_before_delete {
+                        match self.confirm_action.take() {
+                            Some(ConfirmAction::DeleteEntry(ref expected)) if expected == &summary.id => {
+                                match self.service.delete_entry(&summary.id) {
+                                    Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
+                                    Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                                }
+                            }
+                            _ => {
+                                self.confirm_action = Some(ConfirmAction::DeleteEntry(summary.id.clone()));
+                                self.show_toast("Press d again to confirm delete, Esc to cancel", ToastKind::Info);
+                            }
+                        }
+                    } else {
+                        match self.service.delete_entry(&summary.id) {
+                            Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
+                            Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                        }
+                    }
+                }
+            }
+            Action::DuplicateEntry => {
+                let summary_opt = if let AppState::Unlocked(View::Search(ref s)) = self.state {
+                    s.results.get(s.selected).cloned()
+                } else { None };
+                if let Some(summary) = summary_opt {
+                    if let Ok(mut entry) = self.service.get_entry(&summary.id) {
+                        entry.id = vault_core::EntryId::new();
+                        entry.title = format!("{} (copy)", entry.title);
+                        entry.created_at = chrono::Utc::now().timestamp();
+                        entry.updated_at = entry.created_at;
+                        match self.service.create_entry(&entry) {
+                            Ok(()) => { self.show_toast("Entry duplicated", ToastKind::Success); self.pop_to_list(); }
+                            Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
+                        }
+                    }
+                }
+            }
             Action::Select => {
                 let summary_opt = {
                     let AppState::Unlocked(View::Search(ref state)) =
@@ -1150,6 +1372,57 @@ impl App {
             _ => Box::new(View::EntryList(EntryListState::default())),
         };
         self.state = AppState::Unlocked(View::Help(prev));
+    }
+
+    fn handle_export(&mut self) {
+        match self.service.export_all("json") {
+            Ok(data) => {
+                let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                let name = format!("krypton-export-{ts}.json");
+                let dir = dirs::data_dir()
+                    .map(|d| d.join("krypton"))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let _ = std::fs::create_dir_all(&dir);
+                let path = dir.join(&name);
+                match std::fs::write(&path, &data) {
+                    Ok(()) => self.show_toast(
+                        format!("Exported {} to {}", self.service.list_entries().map(|v| v.len()).unwrap_or(0), name),
+                        ToastKind::Success,
+                    ),
+                    Err(e) => self.show_toast(format!("Export failed: {e}"), ToastKind::Error),
+                }
+            }
+            Err(e) => self.show_toast(format!("Export error: {e}"), ToastKind::Error),
+        }
+    }
+
+    fn handle_import(&mut self) {
+        // For simplicity: read from a fixed path. The user places the JSON
+        // file at ~/.local/share/krypton/import.json and presses Ctrl+I.
+        let path = dirs::data_dir()
+            .map(|d| d.join("krypton").join("import.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("import.json"));
+        let data = match std::fs::read(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                self.show_toast(format!("Import file not found: {e} — place import.json in ~/.local/share/krypton/"), ToastKind::Error);
+                return;
+            }
+        };
+        match self.service.import_entries("json", &data) {
+            Ok(entries) => {
+                let count = entries.len();
+                for entry in &entries {
+                    if let Err(e) = self.service.create_entry(entry) {
+                        self.show_toast(format!("Import failed at entry: {e}"), ToastKind::Error);
+                        return;
+                    }
+                }
+                self.show_toast(format!("Imported {count} entries"), ToastKind::Success);
+                self.reload_entries();
+            }
+            Err(e) => self.show_toast(format!("Import error: {e}"), ToastKind::Error),
+        }
     }
 
     fn handle_help(&mut self, action: Action) {

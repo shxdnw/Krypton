@@ -33,4 +33,9 @@ pub enum Action {
     ToggleSetting,
     GeneratePassword,
     Help,
+    Export,
+    Import,
+    CopyUrl,
+    DuplicateEntry,
+    StartReset,
 }

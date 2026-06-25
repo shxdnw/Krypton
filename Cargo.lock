@@ -1616,6 +1616,7 @@ name = "vault-ext"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "serde_json",
  "vault-core",
 ]
 
