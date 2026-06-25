@@ -14,6 +14,7 @@ use crate::config::KryptonConfig;
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
     DeleteEntry(EntryId),
+    SaveEntry,
 }
 
 // ── Toast ────────────────────────────────────────────────────────────────
@@ -245,7 +246,7 @@ impl Default for SettingsState {
 
 impl SettingsState {
     /// Number of setting rows.
-    pub fn len(&self) -> usize { 14 }
+    pub fn len(&self) -> usize { 15 }
 
     /// Get the display label and value string for row `i`.
     pub fn row(&self, i: usize) -> (String, String) {
@@ -270,6 +271,7 @@ impl SettingsState {
             11 => ("Clipboard tool".into(), self.config.clipboard_tool.clone()),
             12 => ("Show row numbers".into(), fmt_bool(self.config.show_row_numbers)),
             13 => ("Accent color".into(), self.config.accent_color.clone()),
+            14 => ("Confirm before save".into(), fmt_bool(self.config.confirm_before_save)),
             _ => ("".into(), "".into()),
         }
     }
@@ -297,14 +299,12 @@ impl SettingsState {
             12 => self.config.show_row_numbers = !self.config.show_row_numbers,
             13 => {
                 self.config.accent_color = match self.config.accent_color.as_str() {
-                    "Cyan" => "Green".into(),
-                    "Green" => "Yellow".into(),
-                    "Yellow" => "Blue".into(),
-                    "Blue" => "Magenta".into(),
-                    "Magenta" => "White".into(),
-                    _ => "Cyan".into(),
+                    "Cyan" => "Green".into(), "Green" => "Yellow".into(),
+                    "Yellow" => "Blue".into(), "Blue" => "Magenta".into(),
+                    "Magenta" => "White".into(), _ => "Cyan".into(),
                 };
             }
+            14 => self.config.confirm_before_save = !self.config.confirm_before_save,
             _ => {}
         }
     }
@@ -1078,6 +1078,9 @@ impl App {
         else {
             return;
         };
+        if !matches!(action, Action::SaveEntry) {
+            self.confirm_action = None;
+        }
 
         match action {
             Action::Back => {
@@ -1166,6 +1169,14 @@ impl App {
                 }
             }
             Action::SaveEntry => {
+                if self.config.confirm_before_save
+                    && !matches!(self.confirm_action, Some(ConfirmAction::SaveEntry))
+                {
+                    self.confirm_action = Some(ConfirmAction::SaveEntry);
+                    self.show_toast("Press Ctrl+S again to confirm save", ToastKind::Info);
+                    return;
+                }
+                self.confirm_action = None;
                 if state.title.trim().is_empty() {
                     self.show_toast(
                         "Title is required",
