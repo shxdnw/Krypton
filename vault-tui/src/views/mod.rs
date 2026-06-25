@@ -7,9 +7,9 @@ pub mod settings;
 pub mod unlock;
 
 use ratatui::{
-    layout::{Alignment, Rect},
-    style::{Color, Style},
-    widgets::Paragraph,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -33,6 +33,42 @@ pub fn render(app: &App, f: &mut Frame) {
         },
     }
 
+    // Confirmation dialog overlay.
+    if let Some(ref dialog) = app.confirm_dialog {
+        let area = centered_rect(50, 7, f.area());
+        f.render_widget(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)), area);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Length(2)])
+            .split(area);
+        let msg = Paragraph::new(dialog.message.as_str())
+            .style(Style::default().fg(Color::White))
+            .alignment(Alignment::Center);
+        f.render_widget(msg, chunks[0]);
+        let hint = Paragraph::new("[←/→] choose  [Enter] confirm  [Esc] cancel")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        f.render_widget(hint, chunks[1]);
+        let yes_style = if dialog.selected_yes {
+            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let no_style = if !dialog.selected_yes {
+            Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let buttons = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(chunks[2]);
+        let yes_p = Paragraph::new(format!("  {}  ", dialog.yes_label)).style(yes_style).alignment(Alignment::Center);
+        let no_p = Paragraph::new(format!("  {}  ", dialog.no_label)).style(no_style).alignment(Alignment::Center);
+        f.render_widget(yes_p, buttons[0]);
+        f.render_widget(no_p, buttons[1]);
+    }
+
     // Toast overlay at the bottom of the screen.
     if let Some(ref toast) = app.toast {
         let color = match toast.kind {
@@ -50,4 +86,23 @@ pub fn render(app: &App, f: &mut Frame) {
             .alignment(Alignment::Center);
         f.render_widget(toast_p, area);
     }
+}
+
+fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
+    let popup = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length((r.height.saturating_sub(height)) / 2),
+            Constraint::Length(height),
+            Constraint::Length((r.height.saturating_sub(height)) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup[1])[1]
 }
