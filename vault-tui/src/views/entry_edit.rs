@@ -23,18 +23,19 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect, accent: Color) 
 
     let pw_display = render_password(state.password.expose_secret());
 
-    let fields: [(u16, &str, String); 5] = [
+    let fields: [(u16, &str, String); 6] = [
         (0, "Title", state.title.clone()),
         (1, "Username", state.username.clone()),
         (2, "Password", pw_display),
         (3, "URL", state.url.clone()),
         (4, "Notes", state.notes.clone()),
+        (5, "Tags", state.tags.clone()),
     ];
 
-    // Simple vertical stack — one paragraph per field.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),

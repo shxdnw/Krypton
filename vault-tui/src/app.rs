@@ -156,6 +156,10 @@ pub struct EntryEditState {
     pub existing_password: SecretString,
     /// The original created_at timestamp for existing entries.
     pub initial_created_at: i64,
+    /// Comma-separated tag input.
+    pub tags: String,
+    /// Original custom fields preserved on save.
+    pub initial_custom_fields: Vec<vault_core::CustomField>,
 }
 
 impl Default for EntryEditState {
@@ -171,6 +175,8 @@ impl Default for EntryEditState {
             dirty: false,
             existing_password: SecretString::new("".into()),
             initial_created_at: 0,
+            tags: String::new(),
+            initial_custom_fields: Vec::new(),
         }
     }
 }
@@ -673,6 +679,8 @@ impl App {
                         Ok(entry) => {
                             let created = entry.created_at;
                             let existing_pw = entry.password.clone();
+                            let tags_str = entry.tags.join(", ");
+                            let cfs = entry.custom_fields.clone();
                             self.state =
                                 AppState::Unlocked(View::EntryEdit(
                                     EntryEditState {
@@ -697,6 +705,8 @@ impl App {
                                         dirty: false,
                                         existing_password: existing_pw,
                                         initial_created_at: created,
+                                        tags: tags_str,
+                                        initial_custom_fields: cfs,
                                     },
                                 ));
                         }
@@ -897,6 +907,8 @@ impl App {
                         dirty: false,
                         existing_password: state.entry.password.clone(),
                         initial_created_at: state.entry.created_at,
+                        tags: state.entry.tags.join(", "),
+                        initial_custom_fields: state.entry.custom_fields.clone(),
                     }
                 };
                 self.state = AppState::Unlocked(View::EntryEdit(edit_state));
@@ -1012,7 +1024,7 @@ impl App {
         match action {
             Action::Back => self.pop_to_list(),
             Action::NextField => {
-                state.active_field = (state.active_field + 1).min(4);
+                state.active_field = (state.active_field + 1).min(5);
             }
             Action::PrevField => {
                 state.active_field =
@@ -1032,6 +1044,7 @@ impl App {
                     }
                     3 => state.url.push(c),
                     4 => state.notes.push(c),
+                    5 => state.tags.push(c),
                     _ => {}
                 }
             }
@@ -1054,9 +1067,8 @@ impl App {
                     3 => {
                         state.url.pop();
                     }
-                    4 => {
-                        state.notes.pop();
-                    }
+                    4 => { state.notes.pop(); }
+                    5 => { state.tags.pop(); }
                     _ => {}
                 }
             }
@@ -1127,8 +1139,11 @@ impl App {
                     } else {
                         Some(state.notes.clone())
                     },
-                    tags: Vec::new(),
-                    custom_fields: Vec::new(),
+                    tags: state.tags.split(',')
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect(),
+                    custom_fields: std::mem::take(&mut state.initial_custom_fields),
                     created_at: if is_new {
                         now
                     } else {
@@ -1276,6 +1291,8 @@ impl App {
                             dirty: false,
                             existing_password: entry.password.clone(),
                             initial_created_at: entry.created_at,
+                            tags: entry.tags.join(", "),
+                            initial_custom_fields: entry.custom_fields.clone(),
                         }));
                     }
                 }
