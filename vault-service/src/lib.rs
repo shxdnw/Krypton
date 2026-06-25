@@ -22,7 +22,7 @@ struct UnlockedSession {
 
 
 pub struct VaultService {
-    store_path: PathBuf,
+    pub store_path: PathBuf,
     deriver: Arc<dyn KeyDeriver>,
     session: RwLock<Option<UnlockedSession>>,
     /// When true, title/username/url are shown as "[hidden]" in the entry
@@ -234,6 +234,32 @@ impl VaultService {
 
     pub fn search(&self, query: &str) -> Result<Vec<EntrySummary>> {
         self.require_session()?.search(query)
+    }
+
+    /// Export all entries in the given format using a registered exporter.
+    pub fn export_all(&self, format: &str) -> Result<Vec<u8>> {
+        let store = self.require_session()?;
+        let entries = store.list_entries_full()?;
+        let exporters = self.extensions.exporters();
+        let exporter = exporters
+            .first()
+            .ok_or_else(|| VaultError::Extension {
+                name: "export".into(),
+                reason: "no exporter registered".into(),
+            })?;
+        exporter.export(format, &entries)
+    }
+
+    /// Import entries from raw data in the given format.
+    pub fn import_entries(&self, format: &str, data: &[u8]) -> Result<Vec<Entry>> {
+        let importers = self.extensions.importers();
+        let importer = importers
+            .first()
+            .ok_or_else(|| VaultError::Extension {
+                name: "import".into(),
+                reason: "no importer registered".into(),
+            })?;
+        importer.import(format, data)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

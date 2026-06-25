@@ -47,6 +47,39 @@ impl SqliteStore {
         }
     }
 
+    /// List all full entries (with decrypted passwords) for export.
+    pub fn list_entries_full(&self) -> Result<Vec<vault_core::Entry>> {
+        let conn = self.conn.lock().map_err(|e| {
+            VaultError::Storage(format!("lock poisoned: {e}"))
+        })?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, encrypted_data FROM entries ORDER BY updated_at DESC",
+            )
+            .map_err(|e| VaultError::Storage(format!("prepare: {e}")))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .map_err(|e| VaultError::Storage(format!("query: {e}")))?;
+        let mut entries = Vec::new();
+        for row in rows {
+            let (id_str, blob) =
+                row.map_err(|e| VaultError::Storage(format!("row: {e}")))?;
+            let _uuid = uuid::Uuid::parse_str(&id_str)
+                .map_err(|_| VaultError::Storage(format!("invalid uuid: {id_str}")))?;
+            let plain = zeroize::Zeroizing::new(
+                self.cipher
+                    .decrypt(&blob)
+                    .map_err(|e| VaultError::Storage(format!("decrypt: {e}")))?,
+            );
+            let data: vault_core::EntryData = serde_json::from_slice(&plain)
+                .map_err(|e| VaultError::Storage(format!("deserialize: {e}")))?;
+            entries.push(data.into_entry());
+        }
+        Ok(entries)
+    }
+
     /// Read a single key from `vault_meta` without needing a cipher.
     ///
     /// This is used during unlock to fetch the salt *before* the encryption

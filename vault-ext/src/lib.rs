@@ -77,6 +77,15 @@ impl Default for GeneratorConfig {
     }
 }
 
+/// Export entries in an external format (JSON, CSV, etc.).
+pub trait ExportExt: Extension {
+    /// Return the list of format identifiers this exporter supports.
+    fn export_formats(&self) -> &[&str];
+
+    /// Serialise a list of entries to the given format.
+    fn export(&self, format: &str, entries: &[Entry]) -> Result<Vec<u8>>;
+}
+
 /// Pluggable password generator.
 pub trait GeneratorExt: Extension {
     /// Unique identifier for this generator (used as a lookup key).

@@ -37,6 +37,39 @@ pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect, _accent: Co
         ])
         .split(block.inner(area));
 
+    if let Some(ref step) = state.reset_step {
+        let (title, display, hint_text) = match step {
+            crate::app::ResetStep::TypingConfirm { buffer } => (
+                "Reset Vault",
+                format!("Type 'I accept the risks' to confirm:\n{buffer}_"),
+                "[Esc] cancel",
+            ),
+            crate::app::ResetStep::Waiting { seconds } => (
+                "Reset Vault",
+                format!("Vault will be deleted in {seconds} seconds...\nAll data will be permanently lost."),
+                "[Esc] cancel",
+            ),
+        };
+        let reset_block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Red));
+        let reset_p = Paragraph::new(display)
+            .style(Style::default().fg(Color::Red))
+            .block(reset_block);
+        let hint = Paragraph::new(hint_text)
+            .style(Style::default().fg(Color::Gray))
+            .alignment(Alignment::Center);
+        let rchunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(5), Constraint::Length(1)])
+            .split(area);
+        f.render_widget(reset_p, rchunks[0]);
+        f.render_widget(hint, rchunks[1]);
+        return;
+    }
+
     let input_p = Paragraph::new(text)
         .style(Style::default().fg(Color::White))
         .block(Block::default().title("Password").borders(Borders::ALL));
@@ -50,7 +83,7 @@ pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect, _accent: Co
         f.render_widget(err_p, chunks[1]);
     }
 
-    let hint = Paragraph::new("[Enter] unlock  [Ctrl+H] show/hide  [Esc] quit")
+    let hint = Paragraph::new("[Enter] unlock  [Ctrl+H] show/hide  [Ctrl+R] reset vault  [Esc] quit")
         .style(Style::default().fg(Color::Gray))
         .alignment(Alignment::Center);
     f.render_widget(hint, chunks[2]);
