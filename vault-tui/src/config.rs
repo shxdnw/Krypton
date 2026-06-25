@@ -133,6 +133,7 @@ impl KryptonConfig {
 
     /// Persist the current config to disk atomically: write to a temp file
     /// then rename over the real path. Creates parent directories if needed.
+    /// Uses owner-only permissions (0o600) on Unix.
     pub fn save(&self) -> Result<(), String> {
         let path = Self::path().ok_or("no config directory")?;
         if let Some(parent) = path.parent() {
@@ -140,8 +141,22 @@ impl KryptonConfig {
         }
         let json = serde_json::to_string_pretty(self).map_err(|e| format!("serialize: {e}"))?;
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &json).map_err(|e| format!("write: {e}"))?;
+        write_private_cfg(&tmp, json.as_bytes())?;
         std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}"))?;
         Ok(())
     }
+}
+
+fn write_private_cfg(path: &std::path::Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| format!("open: {e}"))?;
+    f.write_all(data).map_err(|e| format!("write: {e}"))?;
+    Ok(())
 }

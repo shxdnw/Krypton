@@ -1384,7 +1384,7 @@ impl App {
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let _ = std::fs::create_dir_all(&dir);
                 let path = dir.join(&name);
-                match std::fs::write(&path, &data) {
+                match write_private(&path, &data) {
                     Ok(()) => self.show_toast(
                         format!("Exported {} to {}", self.service.list_entries().map(|v| v.len()).unwrap_or(0), name),
                         ToastKind::Success,
@@ -1716,6 +1716,20 @@ fn try_clipboard_clear(tool: &str) -> bool {
             ok
         }
     }
+}
+
+/// Write data to a file with owner-only permissions (0o600). Used for
+/// credential exports to prevent other local users from reading them.
+fn write_private(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    std::io::Write::write_all(&mut f, data)?;
+    Ok(())
 }
 
 impl Drop for App {
