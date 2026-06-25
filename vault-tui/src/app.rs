@@ -977,41 +977,32 @@ impl App {
                 }
                 let now = chrono::Utc::now().timestamp();
                 let is_new = state.id.is_none();
-                let pw = std::mem::replace(
-                    &mut state.password,
-                    SecretString::new("".into()),
-                );
-                let existing = std::mem::replace(
-                    &mut state.existing_password,
-                    SecretString::new("".into()),
-                );
-                // If the user didn't type a new password, keep the existing one.
-                let password = if pw.expose_secret().is_empty() && !is_new {
-                    existing
+                // Clone fields to build the entry — don't consume state before
+                // the DB call succeeds, or data is lost on error.
+                let pw_empty = state.password.expose_secret().is_empty();
+                let password = if pw_empty && !is_new {
+                    state.existing_password.clone()
                 } else {
-                    pw
+                    state.password.clone()
                 };
                 let entry = Entry {
-                    id: state
-                        .id
-                        .clone()
-                        .unwrap_or_else(vault_core::EntryId::new),
-                    title: std::mem::take(&mut state.title),
+                    id: state.id.clone().unwrap_or_else(vault_core::EntryId::new),
+                    title: state.title.clone(),
                     username: if state.username.is_empty() {
                         None
                     } else {
-                        Some(std::mem::take(&mut state.username))
+                        Some(state.username.clone())
                     },
                     password,
                     url: if state.url.is_empty() {
                         None
                     } else {
-                        Some(std::mem::take(&mut state.url))
+                        Some(state.url.clone())
                     },
                     notes: if state.notes.is_empty() {
                         None
                     } else {
-                        Some(std::mem::take(&mut state.notes))
+                        Some(state.notes.clone())
                     },
                     tags: Vec::new(),
                     custom_fields: Vec::new(),
@@ -1031,10 +1022,7 @@ impl App {
 
                 match result {
                     Ok(()) => {
-                        self.show_toast(
-                            "Entry saved",
-                            ToastKind::Success,
-                        );
+                        self.show_toast("Entry saved", ToastKind::Success);
                         self.reload_entries();
                         self.pop_to_list();
                     }
