@@ -52,11 +52,31 @@ pub fn render(f: &mut Frame, state: &EntryDetailState, area: Rect, _accent: Colo
     };
     render_field(f, chunks[4], "Tags", &tags, field_style);
 
+    let mut cf_y = chunks[4].bottom();
+    for cf in &state.entry.custom_fields {
+        let value = match &cf.value {
+            vault_core::FieldValue::Text(v) => v.clone(),
+            vault_core::FieldValue::Secret(s) => {
+                if state.show_password { s.expose_secret().clone() }
+                else { "\u{2022}".repeat(8) }
+            }
+            vault_core::FieldValue::Totp(secret) => {
+                let code = totp_code(secret);
+                format!("{code} (TOTP)")
+            }
+        };
+        let cf_content = format!("{}: {value}", cf.label);
+        let cf_p = Paragraph::new(cf_content).style(Style::default().fg(Color::White));
+        let cf_area = Rect { y: cf_y, height: 1, x: area.x + 1, width: area.width.saturating_sub(2) };
+        f.render_widget(cf_p, cf_area);
+        cf_y += 1;
+    }
+
     let created = format_time(state.entry.created_at);
     let updated = format_time(state.entry.updated_at);
     let timestamp_text = format!("Created: {created}  |  Updated: {updated}");
     let ts_p = Paragraph::new(timestamp_text).style(Style::default().fg(Color::DarkGray));
-    let ts_area = Rect { y: chunks[4].bottom(), height: 1, ..area };
+    let ts_area = Rect { y: cf_y, height: 1, ..area };
     f.render_widget(ts_p, ts_area);
 
     let pw_hint = if state.show_password { "hide pw" } else { "show pw" };
@@ -71,6 +91,10 @@ pub fn render(f: &mut Frame, state: &EntryDetailState, area: Rect, _accent: Colo
         ..area
     };
     f.render_widget(hint, hint_area);
+}
+
+fn totp_code(_secret: &str) -> String {
+    "------".into() // placeholder — totp-rs needed for real codes
 }
 
 fn format_time(ts: i64) -> String {
