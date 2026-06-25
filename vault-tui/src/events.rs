@@ -93,6 +93,7 @@ fn map_key_to_action(state: &AppState, key: KeyEvent, vim_enabled: bool) -> Opti
             View::EntryEdit(_) => map_entry_edit(key),
             View::Search(_) => map_search(key, vim_enabled),
             View::Settings(_) => map_settings(key, vim_enabled),
+            View::Help(_) => map_help(key),
         },
     }
 }
@@ -142,6 +143,7 @@ fn map_entry_list(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Char('L') => Some(Action::Lock),
         KeyCode::PageUp => Some(Action::PageUp),
         KeyCode::PageDown => Some(Action::PageDown),
+        KeyCode::Char('?') => Some(Action::Help),
         _ => None,
     }
 }
@@ -155,6 +157,7 @@ fn map_entry_detail(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('y') => Some(Action::CopyPassword),
         KeyCode::Char('u') => Some(Action::CopyUsername),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::Back),
+        KeyCode::Char('?') => Some(Action::Help),
         _ => None,
     }
 }
@@ -165,6 +168,7 @@ fn map_entry_edit(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Tab => Some(Action::NextField),
         KeyCode::BackTab => Some(Action::PrevField),
+        KeyCode::Char('?') => Some(Action::Help),
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Enter => Some(Action::NextField),
@@ -195,6 +199,7 @@ fn map_search(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Down => Some(Action::Down),
         KeyCode::Up => Some(Action::Up),
         KeyCode::Enter => Some(Action::Select),
+        KeyCode::Char('?') => Some(Action::Help),
         KeyCode::Char('j') if vim_enabled => Some(Action::Down),
         KeyCode::Char('k') if vim_enabled => Some(Action::Up),
         KeyCode::Char(c) => Some(Action::CharInput(c)),
@@ -207,6 +212,7 @@ fn map_search(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
 fn map_settings(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Back),
+        KeyCode::Char('?') => Some(Action::Help),
         KeyCode::Down => Some(Action::Down),
         KeyCode::Up => Some(Action::Up),
         KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ToggleSetting),
@@ -219,6 +225,15 @@ fn map_settings(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
                 Some(Action::CharInput(c))
             }
         }
+        _ => None,
+    }
+}
+
+// ── Help ───────────────────────────────────────────────────────────────
+
+fn map_help(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => Some(Action::Back),
         _ => None,
     }
 }
