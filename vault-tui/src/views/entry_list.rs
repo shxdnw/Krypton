@@ -54,7 +54,7 @@ pub fn render(
     }
 
     let hint = Paragraph::new(
-        "[Enter] open  [n] new  [e] edit  [d] delete  [y] copy pw  [/] search  [s] settings  [L] lock  [q] quit",
+        "[Enter] open  [n] new  [e] edit  [d] delete  [y] pw  [u] user  [c] url  [/] search  [s] settings  [L] lock  [q] quit",
     )
     .style(Style::default().fg(Color::Gray))
     .alignment(Alignment::Center);

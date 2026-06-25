@@ -52,9 +52,17 @@ pub fn render(f: &mut Frame, state: &EntryDetailState, area: Rect, _accent: Colo
     };
     render_field(f, chunks[4], "Tags", &tags, field_style);
 
-    let hint = Paragraph::new(
-        "[p] show pw  [e] edit  [y] copy pw  [u] copy user  [Esc/q] back",
-    )
+    let created = format_time(state.entry.created_at);
+    let updated = format_time(state.entry.updated_at);
+    let timestamp_text = format!("Created: {created}  |  Updated: {updated}");
+    let ts_p = Paragraph::new(timestamp_text).style(Style::default().fg(Color::DarkGray));
+    let ts_area = Rect { y: chunks[4].bottom(), height: 1, ..area };
+    f.render_widget(ts_p, ts_area);
+
+    let pw_hint = if state.show_password { "hide pw" } else { "show pw" };
+    let hint = Paragraph::new(format!(
+        "[p] {pw_hint}  [e] edit  [y] copy pw  [u] copy user  [c] copy url  [d] delete  [Esc/q] back"
+    ))
     .style(Style::default().fg(Color::Gray))
     .alignment(Alignment::Center);
     let hint_area = Rect {
@@ -63,6 +71,13 @@ pub fn render(f: &mut Frame, state: &EntryDetailState, area: Rect, _accent: Colo
         ..area
     };
     f.render_widget(hint, hint_area);
+}
+
+fn format_time(ts: i64) -> String {
+    if ts <= 0 { return "\u{2014}".into(); }
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "\u{2014}".into())
 }
 
 fn render_field(
