@@ -18,8 +18,12 @@ pub struct KryptonConfig {
     pub clipboard_timeout_secs: u32,
 
     /// Show a confirmation prompt before deleting an entry.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub confirm_before_delete: bool,
+
+    /// Require a second Ctrl+S press before saving an entry.
+    #[serde(default = "default_true")]
+    pub confirm_before_save: bool,
 
     // ── Password generator defaults ──────────────────────────────────
     #[serde(default = "default_pw_length")]
@@ -77,7 +81,8 @@ impl Default for KryptonConfig {
         Self {
             hide_metadata: false,
             clipboard_timeout_secs: 30,
-            confirm_before_delete: false,
+            confirm_before_delete: true,
+            confirm_before_save: true,
             password_length: 20,
             password_uppercase: true,
             password_lowercase: true,
