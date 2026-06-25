@@ -19,11 +19,12 @@ use crate::app::{App, AppState, ToastKind};
 pub fn render(app: &App, f: &mut Frame) {
     let accent = app.accent_color();
     let sidebar = app.config.sidebar_enabled;
+    let row_nums = app.config.show_row_numbers;
     match &app.state {
         AppState::FirstRun(state) => unlock::render_first_run(f, state, f.area(), accent),
         AppState::Locked(state) => unlock::render_locked(f, state, f.area(), accent),
         AppState::Unlocked(view) => match view {
-            crate::app::View::EntryList(state) => entry_list::render(f, state, f.area(), accent, sidebar),
+            crate::app::View::EntryList(state) => entry_list::render(f, state, f.area(), accent, sidebar, row_nums),
             crate::app::View::EntryDetail(state) => entry_detail::render(f, state, f.area(), accent),
             crate::app::View::EntryEdit(state) => entry_edit::render(f, state, f.area(), accent),
             crate::app::View::Search(state) => search::render(f, state, f.area(), accent),

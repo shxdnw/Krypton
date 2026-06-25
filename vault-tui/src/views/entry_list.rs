@@ -16,6 +16,7 @@ pub fn render(
     area: Rect,
     accent: Color,
     sidebar_enabled: bool,
+    show_row_numbers: bool,
 ) {
     let hint_height = 1u16;
 
@@ -34,7 +35,7 @@ pub fn render(
         render_preview(f, state, chunks[0], accent);
 
         // Right: entries table.
-        render_table(f, state, chunks[1], accent);
+        render_table(f, state, chunks[1], accent, show_row_numbers);
 
         // Store table body rect for mouse hit-testing (relative to right pane).
         state.table_rect.set(ratatui::layout::Rect {
@@ -49,7 +50,7 @@ pub fn render(
             height: area.height.saturating_sub(hint_height),
             ..area
         };
-        render_table(f, state, table_area, accent);
+        render_table(f, state, table_area, accent, show_row_numbers);
 
         state.table_rect.set(ratatui::layout::Rect {
             y: table_area.y + 2,
@@ -73,7 +74,7 @@ pub fn render(
 }
 
 /// Render the entries table on the right side.
-fn render_table(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color) {
+fn render_table(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color, show_row_numbers: bool) {
     let block = Block::default()
         .title("Entries")
         .borders(Borders::ALL);
@@ -84,43 +85,32 @@ fn render_table(f: &mut Frame, state: &EntryListState, area: Rect, accent: Color
             .alignment(Alignment::Center)
             .block(block);
         f.render_widget(msg, area);
+    } else if show_row_numbers {
+        let header = Row::new(["#", "Title", "Username", "Updated"])
+            .style(Style::default().fg(accent).add_modifier(Modifier::BOLD));
+        let rows: Vec<Row> = state.entries.iter().enumerate().map(|(i, e)| {
+            let username = e.username.clone().unwrap_or_default();
+            Row::new(vec![(i+1).to_string(), truncate(&e.title, 22), truncate(&username, 16), relative_time(e.updated_at)])
+        }).collect();
+        let widths = [Constraint::Length(4), Constraint::Percentage(38), Constraint::Percentage(28), Constraint::Percentage(30)];
+        let mut ts = TableState::default(); ts.select(Some(state.selected));
+        let t = Table::new(rows, widths).header(header).block(block)
+            .row_highlight_style(Style::default().fg(accent).add_modifier(Modifier::REVERSED))
+            .highlight_symbol("> ");
+        f.render_stateful_widget(t, area, &mut ts);
     } else {
         let header = Row::new(["Title", "Username", "Updated"])
             .style(Style::default().fg(accent).add_modifier(Modifier::BOLD));
-
-        let rows: Vec<Row> = state
-            .entries
-            .iter()
-            .map(|e| {
-                let username = e.username.clone().unwrap_or_default();
-                let updated = relative_time(e.updated_at);
-                Row::new(vec![
-                    truncate(&e.title, 24),
-                    truncate(&username, 18),
-                    updated,
-                ])
-            })
-            .collect();
-
-        let highlight = Style::default()
-            .fg(accent)
-            .add_modifier(Modifier::REVERSED);
-
-        let mut table_state = TableState::default();
-        table_state.select(Some(state.selected));
-
-        let widths = [
-            Constraint::Percentage(40),
-            Constraint::Percentage(30),
-            Constraint::Percentage(30),
-        ];
-
-        let table = Table::new(rows, widths)
-            .header(header)
-            .block(block)
-            .row_highlight_style(highlight)
-            .highlight_symbol("> ");
-
+        let rows: Vec<Row> = state.entries.iter().map(|e| {
+            let username = e.username.clone().unwrap_or_default();
+            let updated = relative_time(e.updated_at);
+            Row::new(vec![truncate(&e.title, 24), truncate(&username, 18), updated])
+        }).collect();
+        let highlight = Style::default().fg(accent).add_modifier(Modifier::REVERSED);
+        let mut table_state = TableState::default(); table_state.select(Some(state.selected));
+        let widths = [Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)];
+        let table = Table::new(rows, widths).header(header).block(block)
+            .row_highlight_style(highlight).highlight_symbol("> ");
         f.render_stateful_widget(table, area, &mut table_state);
     }
 }
