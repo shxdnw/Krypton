@@ -9,11 +9,21 @@ use crate::actions::Action;
 use crate::config::KryptonConfig;
 
 
-/// A pending destructive action that needs a second confirmation.
+/// What the dialog will do if the user picks Yes.
 #[derive(Debug, Clone)]
-pub enum ConfirmAction {
+pub enum PendingAction {
     DeleteEntry(EntryId),
-    SaveEntry,
+    SaveEditedEntry,
+}
+
+/// A modal Yes/No confirmation dialog.
+#[derive(Debug, Clone)]
+pub struct ConfirmDialog {
+    pub message: String,
+    pub yes_label: String,
+    pub no_label: String,
+    pub selected_yes: bool,
+    pub action: PendingAction,
 }
 
 
@@ -364,8 +374,8 @@ pub struct App {
     pub toast_ticks: u8,
     /// Handle to abort the clipboard-clear timer so we can wipe on lock/quit.
     clipboard_abort: Option<tokio::task::AbortHandle>,
-    /// Pending confirmation for a destructive action.
-    pub confirm_action: Option<ConfirmAction>,
+    /// Active confirmation dialog (if shown, captures all key input).
+    pub confirm_dialog: Option<ConfirmDialog>,
     /// Idle tick counter for auto-lock.
     idle_ticks: u64,
 }
@@ -384,7 +394,7 @@ impl App {
             toast: None,
             toast_ticks: 0,
             clipboard_abort: None,
-            confirm_action: None,
+            confirm_dialog: None,
             idle_ticks: 0,
         }
     }
@@ -441,12 +451,25 @@ impl App {
         if !matches!(action, Action::Tick) {
             self.reset_idle();
         }
+        if self.confirm_dialog.is_some() {
+            match action {
+                Action::Tick => self.tick(),
+                Action::Quit => {
+                    self.clear_clipboard_now();
+                    self.service.lock();
+                    self.confirm_dialog = None;
+                    self.should_quit = true;
+                }
+                _ => self.handle_dialog_key(action),
+            }
+            return;
+        }
         match action {
             Action::Tick => self.tick(),
             Action::Quit => {
                 self.clear_clipboard_now();
                 self.service.lock();
-                self.confirm_action = None;
+                self.confirm_dialog = None;
                 self.should_quit = true;
             }
             _ => self.handle_action_inner(action),
@@ -628,11 +651,6 @@ impl App {
             return;
         };
 
-        // Clear pending confirmation on any action other than DeleteEntry.
-        if !matches!(action, Action::DeleteEntry) {
-            self.confirm_action = None;
-        }
-
         match action {
             Action::Up => {
                 if state.selected > 0 {
@@ -753,61 +771,24 @@ impl App {
                 }
             }
             Action::DeleteEntry => {
-                if !self.config.confirm_before_delete {
-                    // No confirmation needed — delete immediately.
-                    if let Some(summary) =
-                        state.entries.get(state.selected)
-                    {
-                        match self.service.delete_entry(&summary.id) {
-                            Ok(()) => {
-                                self.show_toast(
-                                    "Entry deleted",
-                                    ToastKind::Success,
-                                );
-                                self.reload_entries();
-                            }
-                            Err(e) => self.show_toast(
-                                format!("Error: {e}"),
-                                ToastKind::Error,
-                            ),
-                        }
-                    }
-                } else if let Some(summary) =
-                    state.entries.get(state.selected).cloned()
-                {
-                    match self.confirm_action.take() {
-                        Some(ConfirmAction::DeleteEntry(ref expected_id))
-                            if expected_id == &summary.id =>
-                        {
-                            // Second press — confirmed.
-                            match self.service.delete_entry(&summary.id) {
-                                Ok(()) => {
-                                    self.show_toast(
-                                        "Entry deleted",
-                                        ToastKind::Success,
-                                    );
-                                    self.reload_entries();
-                                }
-                                Err(e) => self.show_toast(
-                                    format!("Error: {e}"),
-                                    ToastKind::Error,
-                                ),
-                            }
-                        }
-                        _ => {
-                            // First press — ask for confirmation.
-                            self.confirm_action =
-                                Some(ConfirmAction::DeleteEntry(
-                                    summary.id.clone(),
-                                ));
-                            self.show_toast(
-                                "Press d again to confirm delete, Esc to cancel",
-                                ToastKind::Info,
-                            );
-                        }
+                if let Some(summary) = state.entries.get(state.selected) {
+                    let id = summary.id.clone();
+                    let title = summary.title.clone();
+                    if self.config.confirm_before_delete {
+                        self.confirm_dialog = Some(ConfirmDialog {
+                            message: format!("Delete \"{title}\"?"),
+                            yes_label: "Yes, delete".into(),
+                            no_label: "No, keep it".into(),
+                            selected_yes: false,
+                            action: PendingAction::DeleteEntry(id),
+                        });
+                    } else if let Err(e) = self.service.delete_entry(&id) {
+                        self.show_toast(format!("Error: {e}"), ToastKind::Error);
+                    } else {
+                        self.show_toast("Entry deleted", ToastKind::Success);
+                        self.reload_entries();
                     }
                 }
-                return; // skip the confirm_action clear below
             }
             Action::CopyPassword => {
                 if let Some(summary) =
@@ -995,28 +976,23 @@ impl App {
                 }
             }
             Action::DeleteEntry => {
-                let id = {
+                let (id, title) = {
                     let AppState::Unlocked(View::EntryDetail(ref state)) = &self.state else { return; };
-                    state.entry.id.clone()
+                    (state.entry.id.clone(), state.entry.title.clone())
                 };
                 if self.config.confirm_before_delete {
-                    match self.confirm_action.take() {
-                        Some(ConfirmAction::DeleteEntry(ref expected)) if expected == &id => {
-                            match self.service.delete_entry(&id) {
-                                Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
-                                Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
-                            }
-                        }
-                        _ => {
-                            self.confirm_action = Some(ConfirmAction::DeleteEntry(id));
-                            self.show_toast("Press d again to confirm delete, Esc to cancel", ToastKind::Info);
-                        }
-                    }
+                    self.confirm_dialog = Some(ConfirmDialog {
+                        message: format!("Delete \"{title}\"?"),
+                        yes_label: "Yes, delete".into(),
+                        no_label: "No, keep it".into(),
+                        selected_yes: false,
+                        action: PendingAction::DeleteEntry(id),
+                    });
+                } else if let Err(e) = self.service.delete_entry(&id) {
+                    self.show_toast(format!("Error: {e}"), ToastKind::Error);
                 } else {
-                    match self.service.delete_entry(&id) {
-                        Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
-                        Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
-                    }
+                    self.show_toast("Entry deleted", ToastKind::Success);
+                    self.pop_to_list();
                 }
             }
             Action::DuplicateEntry => {
@@ -1068,10 +1044,6 @@ impl App {
         else {
             return;
         };
-        if !matches!(action, Action::SaveEntry) {
-            self.confirm_action = None;
-        }
-
         match action {
             Action::Back => {
                 if state.dirty {
@@ -1159,14 +1131,16 @@ impl App {
                 }
             }
             Action::SaveEntry => {
-                if self.config.confirm_before_save
-                    && !matches!(self.confirm_action, Some(ConfirmAction::SaveEntry))
-                {
-                    self.confirm_action = Some(ConfirmAction::SaveEntry);
-                    self.show_toast("Press Ctrl+S again to confirm save", ToastKind::Info);
+                if self.config.confirm_before_save {
+                    self.confirm_dialog = Some(ConfirmDialog {
+                        message: "Save this entry?".into(),
+                        yes_label: "Yes, save".into(),
+                        no_label: "No, go back".into(),
+                        selected_yes: false,
+                        action: PendingAction::SaveEditedEntry,
+                    });
                     return;
                 }
-                self.confirm_action = None;
                 if state.title.trim().is_empty() {
                     self.show_toast(
                         "Title is required",
@@ -1362,28 +1336,23 @@ impl App {
                 }
             }
             Action::DeleteEntry => {
-                let summary_opt = if let AppState::Unlocked(View::Search(ref s)) = self.state {
-                    s.results.get(s.selected).cloned()
+                let opt = if let AppState::Unlocked(View::Search(ref s)) = self.state {
+                    s.results.get(s.selected).map(|s| (s.id.clone(), s.title.clone()))
                 } else { None };
-                if let Some(summary) = summary_opt {
+                if let Some((id, title)) = opt {
                     if self.config.confirm_before_delete {
-                        match self.confirm_action.take() {
-                            Some(ConfirmAction::DeleteEntry(ref expected)) if expected == &summary.id => {
-                                match self.service.delete_entry(&summary.id) {
-                                    Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
-                                    Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
-                                }
-                            }
-                            _ => {
-                                self.confirm_action = Some(ConfirmAction::DeleteEntry(summary.id.clone()));
-                                self.show_toast("Press d again to confirm delete, Esc to cancel", ToastKind::Info);
-                            }
-                        }
+                        self.confirm_dialog = Some(ConfirmDialog {
+                            message: format!("Delete \"{title}\"?"),
+                            yes_label: "Yes, delete".into(),
+                            no_label: "No, keep it".into(),
+                            selected_yes: false,
+                            action: PendingAction::DeleteEntry(id),
+                        });
+                    } else if let Err(e) = self.service.delete_entry(&id) {
+                        self.show_toast(format!("Error: {e}"), ToastKind::Error);
                     } else {
-                        match self.service.delete_entry(&summary.id) {
-                            Ok(()) => { self.show_toast("Entry deleted", ToastKind::Success); self.pop_to_list(); }
-                            Err(e) => self.show_toast(format!("Error: {e}"), ToastKind::Error),
-                        }
+                        self.show_toast("Entry deleted", ToastKind::Success);
+                        self.pop_to_list();
                     }
                 }
             }
@@ -1430,6 +1399,51 @@ impl App {
                         ),
                     }
                 }
+            }
+            _ => {}
+        }
+    }
+
+    // ── Confirmation dialog ─────────────────────────────────────────
+
+    fn handle_dialog_key(&mut self, action: Action) {
+        let dialog = match self.confirm_dialog.as_mut() {
+            Some(d) => d,
+            None => return,
+        };
+        match action {
+            Action::Up | Action::Down | Action::NextField | Action::PrevField => {
+                dialog.selected_yes = !dialog.selected_yes;
+            }
+            Action::CharInput('h') | Action::CharInput('l') => {
+                dialog.selected_yes = !dialog.selected_yes;
+            }
+            Action::Submit | Action::Select => {
+                let d = self.confirm_dialog.take().unwrap();
+                if d.selected_yes {
+                    match d.action {
+                        PendingAction::DeleteEntry(id) => {
+                            if let Err(e) = self.service.delete_entry(&id) {
+                                self.show_toast(format!("Error: {e}"), ToastKind::Error);
+                            } else {
+                                self.show_toast("Entry deleted", ToastKind::Success);
+                                self.pop_to_list();
+                            }
+                        }
+                        PendingAction::SaveEditedEntry => {
+                            let saved = self.config.confirm_before_save;
+                            self.config.confirm_before_save = false;
+                            self.confirm_dialog = None;
+                            self.handle_action_inner(Action::SaveEntry);
+                            self.config.confirm_before_save = saved;
+                            if self.confirm_dialog.is_none() && matches!(self.state, AppState::Unlocked(View::EntryEdit(_))) {
+                            }
+                        }
+                    }
+                }
+            }
+            Action::Back | Action::CharInput('q') => {
+                self.confirm_dialog = None;
             }
             _ => {}
         }
