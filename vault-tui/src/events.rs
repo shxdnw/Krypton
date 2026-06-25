@@ -163,6 +163,7 @@ fn map_entry_list(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
 fn map_entry_detail(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Char('p') => Some(Action::ToggleVisibility),
+        KeyCode::Char('n') => Some(Action::Down),
         KeyCode::Char('e') => Some(Action::EditEntry),
         KeyCode::Char('y') => Some(Action::CopyPassword),
         KeyCode::Char('u') => Some(Action::CopyUsername),

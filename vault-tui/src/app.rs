@@ -242,7 +242,7 @@ impl Default for SettingsState {
 
 impl SettingsState {
     /// Number of setting rows.
-    pub fn len(&self) -> usize { 12 }
+    pub fn len(&self) -> usize { 14 }
 
     /// Get the display label and value string for row `i`.
     pub fn row(&self, i: usize) -> (String, String) {
@@ -265,6 +265,8 @@ impl SettingsState {
             9 => ("Sidebar enabled".into(), fmt_bool(self.config.sidebar_enabled)),
             10 => ("Vim keybinds (j/k)".into(), fmt_bool(self.config.vim_keybinds)),
             11 => ("Clipboard tool".into(), self.config.clipboard_tool.clone()),
+            12 => ("Show row numbers".into(), fmt_bool(self.config.show_row_numbers)),
+            13 => ("Accent color".into(), self.config.accent_color.clone()),
             _ => ("".into(), "".into()),
         }
     }
@@ -282,12 +284,22 @@ impl SettingsState {
             9 => self.config.sidebar_enabled = !self.config.sidebar_enabled,
             10 => self.config.vim_keybinds = !self.config.vim_keybinds,
             11 => {
-                // Cycle clipboard tool: auto → wl-copy → xclip → arboard → auto
                 self.config.clipboard_tool = match self.config.clipboard_tool.as_str() {
                     "auto" => "wl-copy".into(),
                     "wl-copy" => "xclip".into(),
                     "xclip" => "arboard".into(),
                     _ => "auto".into(),
+                };
+            }
+            12 => self.config.show_row_numbers = !self.config.show_row_numbers,
+            13 => {
+                self.config.accent_color = match self.config.accent_color.as_str() {
+                    "Cyan" => "Green".into(),
+                    "Green" => "Yellow".into(),
+                    "Yellow" => "Blue".into(),
+                    "Blue" => "Magenta".into(),
+                    "Magenta" => "White".into(),
+                    _ => "Cyan".into(),
                 };
             }
             _ => {}
@@ -354,6 +366,8 @@ pub struct App {
     clipboard_abort: Option<tokio::task::AbortHandle>,
     /// Pending confirmation for a destructive action.
     pub confirm_action: Option<ConfirmAction>,
+    /// Idle tick counter for auto-lock.
+    idle_ticks: u64,
 }
 
 impl App {
@@ -371,6 +385,7 @@ impl App {
             toast_ticks: 0,
             clipboard_abort: None,
             confirm_action: None,
+            idle_ticks: 0,
         }
     }
 
@@ -389,6 +404,23 @@ impl App {
                 self.toast = None;
             }
         }
+        if self.config.auto_lock_seconds > 0 {
+            self.idle_ticks += 1;
+            let threshold = (self.config.auto_lock_seconds as u64 * 1000) / 50;
+            if self.idle_ticks >= threshold {
+                if matches!(self.state, AppState::Unlocked(_)) {
+                    self.clear_clipboard_now();
+                    self.service.lock();
+                    self.state = AppState::Locked(LockedState::default());
+                    self.show_toast("Vault auto-locked", ToastKind::Info);
+                }
+            }
+        }
+    }
+
+    /// Reset the idle timer — call on every user interaction.
+    pub fn reset_idle(&mut self) {
+        self.idle_ticks = 0;
     }
 
     /// Resolve the configured accent color to a ratatui [`Color`].
@@ -406,6 +438,9 @@ impl App {
 
     /// Central dispatch: maps an [`Action`] to a state transition.
     pub fn handle_action(&mut self, action: Action) {
+        if !matches!(action, Action::Tick) {
+            self.reset_idle();
+        }
         match action {
             Action::Tick => self.tick(),
             Action::Quit => {
@@ -935,6 +970,19 @@ impl App {
                 }
             }
             Action::Help => self.open_help(),
+            Action::Up | Action::Down => {
+                let entries = match self.service.list_entries() { Ok(v) => v, Err(_) => return };
+                if entries.is_empty() { return; }
+                let AppState::Unlocked(View::EntryDetail(ref state)) = &self.state else { return; };
+                let cur = entries.iter().position(|e| e.id == state.entry.id).unwrap_or(0);
+                let idx = match action {
+                    Action::Up => if cur > 0 { cur - 1 } else { entries.len() - 1 },
+                    _ => if cur + 1 < entries.len() { cur + 1 } else { 0 },
+                };
+                if let Ok(entry) = self.service.get_entry(&entries[idx].id) {
+                    self.state = AppState::Unlocked(View::EntryDetail(EntryDetailState { entry, show_password: false }));
+                }
+            }
             Action::CopyUrl => {
                 let url = {
                     let AppState::Unlocked(View::EntryDetail(ref state)) = &self.state else { return; };
@@ -1022,7 +1070,12 @@ impl App {
         };
 
         match action {
-            Action::Back => self.pop_to_list(),
+            Action::Back => {
+                if state.dirty {
+                    self.show_toast("Unsaved changes discarded", ToastKind::Info);
+                }
+                self.pop_to_list();
+            }
             Action::NextField => {
                 state.active_field = (state.active_field + 1).min(5);
             }

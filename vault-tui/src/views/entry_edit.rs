@@ -1,6 +1,7 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -66,6 +67,19 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect, accent: Color) 
         if idx < chunks.len() {
             f.render_widget(p, chunks[idx]);
         }
+        if *field_idx == 2 && !state.password.expose_secret().is_empty() {
+            let pw = state.password.expose_secret();
+            let score = password_strength(pw);
+            let (bar, color) = match score {
+                0..=1 => ("\u{2588}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591} Weak", Color::Red),
+                2 => ("\u{2588}\u{2588}\u{2588}\u{2588}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591}\u{2591} Fair", Color::Yellow),
+                3 => ("\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2591}\u{2591}\u{2591} Good", Color::Cyan),
+                _ => ("\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588} Strong", Color::Green),
+            };
+            let bar_text = Line::from(Span::styled(bar, Style::default().fg(color)));
+            let bar_area = Rect { y: chunks[idx].bottom(), height: 1, x: chunks[idx].x + 1, width: chunks[idx].width.saturating_sub(2) };
+            f.render_widget(Paragraph::new(bar_text), bar_area);
+        }
     }
 
     let hint = Paragraph::new(
@@ -79,6 +93,19 @@ pub fn render(f: &mut Frame, state: &EntryEditState, area: Rect, accent: Color) 
         ..area
     };
     f.render_widget(hint, hint_area);
+}
+
+fn password_strength(pw: &str) -> u8 {
+    let len = pw.len();
+    let has_upper = pw.chars().any(|c| c.is_uppercase());
+    let has_lower = pw.chars().any(|c| c.is_lowercase());
+    let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+    let has_sym = pw.chars().any(|c| c.is_ascii_punctuation());
+    let classes = has_upper as u8 + has_lower as u8 + has_digit as u8 + has_sym as u8;
+    if len >= 16 && classes >= 3 { 4 }
+    else if len >= 12 && classes >= 2 { 3 }
+    else if len >= 8 && classes >= 1 { 2 }
+    else { 1 }
 }
 
 fn render_password(pw: &str) -> String {

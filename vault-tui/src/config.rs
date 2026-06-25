@@ -66,6 +66,10 @@ pub struct KryptonConfig {
     /// "auto" tries arboard first, then falls back to wl-copy / xclip.
     #[serde(default = "default_clipboard_tool")]
     pub clipboard_tool: String,
+
+    /// Auto-lock after N seconds of inactivity. 0 = disabled.
+    #[serde(default)]
+    pub auto_lock_seconds: u32,
 }
 
 impl Default for KryptonConfig {
@@ -85,6 +89,7 @@ impl Default for KryptonConfig {
             sidebar_enabled: true,
             vim_keybinds: true,
             clipboard_tool: "auto".into(),
+            auto_lock_seconds: 0,
         }
     }
 }
