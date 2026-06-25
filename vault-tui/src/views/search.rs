@@ -70,7 +70,7 @@ pub fn render(f: &mut Frame, state: &SearchState, area: Rect, accent: Color) {
     }
 
     // Bottom bar.
-    let hint = Paragraph::new("[Esc] back  [j/k] navigate  [Enter] open")
+    let hint = Paragraph::new("[Esc] back  [j/k] navigate  [Enter] open  [y] pw  [u] user  [e] edit  [d] delete")
         .style(Style::default().fg(Color::Gray))
         .alignment(Alignment::Center);
     let hint_area = Rect {
