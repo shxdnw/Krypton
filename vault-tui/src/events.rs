@@ -99,12 +99,13 @@ fn map_key_to_action(state: &AppState, key: KeyEvent, vim_enabled: bool) -> Opti
 
 fn map_locked_or_firstrun(key: KeyEvent) -> Option<Action> {
     match key.code {
-        KeyCode::Char(c) => Some(Action::CharInput(c)),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::CharInput(c))
+        }
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Enter => Some(Action::Submit),
         KeyCode::Esc => Some(Action::Quit),
         _ => {
-            // Ctrl+H or Ctrl+V to toggle visibility.
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match key.code {
                     KeyCode::Char('h') | KeyCode::Char('v') => {
@@ -196,16 +197,15 @@ fn map_entry_edit(key: KeyEvent) -> Option<Action> {
         KeyCode::Enter => Some(Action::NextField),
         KeyCode::Down | KeyCode::Right => Some(Action::NextField),
         KeyCode::Up | KeyCode::Left => Some(Action::PrevField),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::CharInput(c))
+        }
         KeyCode::Char(c) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                match c {
-                    's' => Some(Action::SaveEntry),
-                    'g' => Some(Action::GeneratePassword),
-                    'l' => Some(Action::Lock),
-                    _ => Some(Action::CharInput(c)),
-                }
-            } else {
-                Some(Action::CharInput(c))
+            match c {
+                's' => Some(Action::SaveEntry),
+                'g' => Some(Action::GeneratePassword),
+                'l' => Some(Action::Lock),
+                _ => None,
             }
         }
         _ => None,
@@ -227,15 +227,14 @@ fn map_search(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Char('d') => Some(Action::DeleteEntry),
         KeyCode::Char('j') if vim_enabled => Some(Action::Down),
         KeyCode::Char('k') if vim_enabled => Some(Action::Up),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::CharInput(c))
+        }
         KeyCode::Char(c) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                match c {
-                    'd' => Some(Action::DuplicateEntry),
-                    'l' => Some(Action::Lock),
-                    _ => Some(Action::CharInput(c)),
-                }
-            } else {
-                Some(Action::CharInput(c))
+            match c {
+                'd' => Some(Action::DuplicateEntry),
+                'l' => Some(Action::Lock),
+                _ => None,
             }
         }
         _ => None,
@@ -252,15 +251,14 @@ fn map_settings(key: KeyEvent, vim_enabled: bool) -> Option<Action> {
         KeyCode::Enter | KeyCode::Char(' ') => Some(Action::ToggleSetting),
         KeyCode::Char('j') if vim_enabled => Some(Action::Down),
         KeyCode::Char('k') if vim_enabled => Some(Action::Up),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::CharInput(c))
+        }
         KeyCode::Char(c) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                match c {
-                    's' => Some(Action::SaveEntry),
-                    'l' => Some(Action::Lock),
-                    _ => Some(Action::CharInput(c)),
-                }
-            } else {
-                Some(Action::CharInput(c))
+            match c {
+                's' => Some(Action::SaveEntry),
+                'l' => Some(Action::Lock),
+                _ => None,
             }
         }
         _ => None,
