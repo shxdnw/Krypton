@@ -7,6 +7,7 @@ use ratatui::{
 use secrecy::ExposeSecret;
 
 use crate::app::{FirstRunState, LockedState};
+use super::centered_rect;
 
 /// Render the unlock screen (existing vault, enter password).
 pub fn render_locked(f: &mut Frame, state: &LockedState, area: Rect, _accent: Color) {
@@ -142,28 +143,4 @@ pub fn render_first_run(f: &mut Frame, state: &FirstRunState, area: Rect, _accen
         .style(Style::default().fg(Color::Gray))
         .alignment(Alignment::Center);
     f.render_widget(hint_p, chunks[2]);
-}
-
-/// Helper: shrink `area` to a given percent width and absolute height,
-/// centered horizontally and vertically.
-fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length((r.height.saturating_sub(height)) / 2),
-            Constraint::Length(height),
-            Constraint::Length((r.height.saturating_sub(height)) / 2),
-        ])
-        .split(r);
-
-    let horz = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1]);
-
-    horz[1]
 }

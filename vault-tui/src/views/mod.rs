@@ -86,7 +86,9 @@ pub fn render(app: &App, f: &mut Frame) {
     }
 }
 
-fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
+/// Helper: shrink `area` to a given percent width and absolute height,
+/// centered horizontally and vertically.
+pub(crate) fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
     let popup = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

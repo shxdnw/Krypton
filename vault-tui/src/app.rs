@@ -28,7 +28,6 @@ pub struct ConfirmDialog {
 
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum ToastKind {
     Info,
     Success,
@@ -51,8 +50,6 @@ pub struct LockedState {
     pub input: SecretString,
     pub hidden: bool,
     pub error: Option<String>,
-    #[allow(dead_code)]
-    pub loading: bool,
     pub reset_step: Option<ResetStep>,
 }
 
@@ -68,7 +65,6 @@ impl Default for LockedState {
             input: SecretString::new("".into()),
             hidden: true,
             error: None,
-            loading: false,
             reset_step: None,
         }
     }

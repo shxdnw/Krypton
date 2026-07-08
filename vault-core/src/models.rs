@@ -21,7 +21,6 @@ impl fmt::Display for EntryId {
     }
 }
 
-// ── FieldValue (with manual serde for SecretString safety) ───────────────
 
 /// Typed value of a custom field.
 ///
@@ -159,7 +158,6 @@ impl From<&Entry> for EntrySummary {
     }
 }
 
-// ── EntryData (serde mirror, transient, zeroized on drop) ────────────────
 
 /// Serde-compatible mirror of [`Entry`] where the password is a plain
 /// [`String`]. This type is *only* used transiently inside encrypted blobs —
